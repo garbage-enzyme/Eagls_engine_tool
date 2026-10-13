@@ -1,37 +1,118 @@
+// EAGLS 命令行入口：参数获取、顶层分发与帮助输出。
+//
+// Windows 下参数必须经 CommandLineToArgvW 获取宽字符命令行再统一转成 UTF-8：
+// MinGW 与 MSVC 交给 main 的 argv 编码互不相同（UTF-8 与本地代码页），
+// 不能直接使用。控制台输出设为 UTF-8 代码页后按 UTF-8 字节写出；
+// 重定向到文件或管道时字节流不受影响。
+//
+// 本文件面向 Windows（项目目标平台），依赖 shellapi.h。
+
+#include "pak_commands.hpp"
+
 #include <eagls/version.hpp>
 
+#include <cstddef>
+#include <cwchar>
 #include <iostream>
+#include <string>
 #include <string_view>
+#include <vector>
+
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+
+#include <shellapi.h>
 
 namespace {
 
+// 顶层帮助。tests/cli_test.cmake 依赖其中必须出现的“用法：eagls”与“尚未实现”字样。
 void print_help() {
     std::cout
         << "EAGLS Engine Tool（重启开发中）\n\n"
-        << "用法：eagls [--help | --version]\n\n"
-        << "  -h, --help     显示帮助\n"
-        << "  --version      显示核心版本\n\n"
-        << "当前仅提供工程骨架，尚未实现资源读取、提取、转换或回包。\n";
+        << "用法：eagls <命令> [参数]\n\n"
+        << "命令：\n"
+        << "  eagls pak info    <idx> <pak>             显示归档信息\n"
+        << "  eagls pak list    <idx> <pak>             列出全部条目\n"
+        << "  eagls pak extract <idx> <pak> [选项]      提取条目\n"
+        << "  eagls pak --help                          显示 pak 子命令帮助\n"
+        << "  eagls --help                              显示本帮助\n"
+        << "  eagls --version                           显示核心版本\n\n"
+        << "pak extract 选项：\n"
+        << "  --out DIR     输出目录（默认：<pak 所在目录>/<pak 主文件名>_out）\n"
+        << "  --entry NAME  只提取指定条目，可重复；NAME 可带目录前缀，\n"
+        << "                比较时只使用最后一个路径分隔符之后的部分\n"
+        << "  --overwrite   允许覆盖输出目录中已存在的同名普通文件\n\n"
+        << "目前已实现 IDX/PAK 归档的信息查看、列目录与原样提取；\n"
+        << "条目解密/转换、文本编辑与回包尚未实现。\n";
 }
 
+// 宽字符串转 UTF-8。
+std::string wide_to_utf8(const wchar_t* text) {
+    const int length = static_cast<int>(::wcslen(text));
+    if (length == 0) {
+        return {};
+    }
+    const int size = ::WideCharToMultiByte(CP_UTF8, 0, text, length, nullptr, 0, nullptr, nullptr);
+    if (size <= 0) {
+        return {};
+    }
+    std::string result(static_cast<std::size_t>(size), '\0');
+    ::WideCharToMultiByte(CP_UTF8, 0, text, length, result.data(), size, nullptr, nullptr);
+    return result;
 }
 
-int main(int argc, char* argv[]) {
-    if (argc == 1) {
+// 取 UTF-8 形式的命令行参数（不含程序名）。
+std::vector<std::string> command_line_arguments() {
+    int count = 0;
+    wchar_t** wide_arguments = ::CommandLineToArgvW(::GetCommandLineW(), &count);
+    std::vector<std::string> result;
+    if (wide_arguments == nullptr) {
+        return result;
+    }
+    result.reserve(static_cast<std::size_t>(count > 0 ? count - 1 : 0));
+    for (int i = 1; i < count; ++i) {
+        result.push_back(wide_to_utf8(wide_arguments[i]));
+    }
+    ::LocalFree(wide_arguments);
+    return result;
+}
+
+// 让真实控制台按 UTF-8 解释程序输出；重定向到文件或管道时不影响字节流。
+void prepare_console() {
+    ::SetConsoleOutputCP(CP_UTF8);
+}
+
+}  // namespace
+
+int main() {
+    prepare_console();
+    const std::vector<std::string> arguments = command_line_arguments();
+
+    if (arguments.empty()) {
         print_help();
         return 0;
     }
 
-    if (argc == 2) {
-        const std::string_view argument{argv[1]};
-        if (argument == "--help" || argument == "-h") {
+    if (arguments.size() == 1) {
+        const std::string_view first{arguments[0]};
+        if (first == "--help" || first == "-h") {
             print_help();
             return 0;
         }
-        if (argument == "--version") {
+        if (first == "--version") {
             std::cout << "eagls " << eagls::version() << '\n';
             return 0;
         }
+    }
+
+    if (arguments[0] == "pak") {
+        const std::vector<std::string> rest(arguments.begin() + 1, arguments.end());
+        return cli::run_pak_command(rest);
     }
 
     // 未实现的命令与非法参数明确失败，不返回伪成功。
