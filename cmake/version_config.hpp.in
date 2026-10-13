@@ -1,0 +1,6 @@
+#pragma once
+
+// 由 CMake 生成，只供核心内部使用；版本号统一取自根项目配置。
+namespace eagls::detail {
+inline constexpr char build_version[] = "@PROJECT_VERSION@";
+}

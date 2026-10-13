@@ -1,54 +1,103 @@
-# Eagls Engine Tool
+# EAGLS Engine Tool
 
-<div align="center">
-  <img src="https://img.shields.io/badge/language-C++-blue.svg" alt="Language">
-  <img src="https://img.shields.io/badge/platform-Windows-brightgreen.svg" alt="Platform">
-  <img src="https://img.shields.io/badge/license-MIT-orange.svg" alt="License">
-</div>
+> **项目正在重启，目前只有可构建、可测试的工程骨架。尚未实现可用的资源处理功能，也未验证任何真实游戏的兼容性。**
+>
+> 旧 C++ 移植代码、旧可执行程序及分散的工程文件已经移除。旧版使用说明不再适用，请勿把历史版本或构建成功视为资源处理正确的证明。
 
-## 📝 项目简介 | Project Introduction
+## 目标与现状
 
-Eagls Engine Tool 是一套用于处理 EAGLS 引擎游戏资源的工具集，包括文本提取与修改、图片压缩与加密/解密、资源打包与解包等功能。
+从真实 EAGLS 游戏资源及游戏行为出发，实现原生 C++ 工具。面向资源提取与汉化工作流，独立核心由 CLI 与未来 GUI 共用。
 
-Eagls Engine Tool is a toolkit for processing game resources from the EAGLS engine, including text extraction and modification, image compression and encryption/decryption, resource packing and unpacking.
+| 项目 | 当前状态 |
+| --- | --- |
+| C++17 核心静态库、统一 CMake、CTest | 已建立工程骨架 |
+| CLI 帮助、版本、非法参数处理 | 已实现 |
+| IDX/PAK 检查、列目录、原样提取 | 未实现，下一阶段目标 |
+| 内容解密、GR 图像编解码、文本回填、回包 | 未实现 |
+| GUI | 暂定 FLTK，尚未接入 |
+| 真实游戏兼容性 | 未验证 |
 
-## 🚀 使用方法 | Usage
+不以旧 C++ 或参考 Python 的输出作为正确性标准，也不把程序内部往返自洽等同于游戏兼容。
 
-### 图片转换 | Image Conversion (bmp2gr)
+## 目录
 
-```bash
-bmp2gr.exe <输入目录|input_directory> <输出目录|output_directory>
+```text
+eagls_packer/
+├── CMakeLists.txt          # 唯一构建入口
+├── cmake/                 # 编译选项与生成文件模板
+├── include/eagls/         # 核心公开接口
+├── src/                   # eagls_core 的内部实现
+├── apps/
+│   ├── cli/               # eagls 命令行入口
+│   └── gui/               # FLTK 接入边界说明，暂无 GUI 代码
+├── tests/                 # 核心与 CLI 测试
+│   └── fixtures/          # 测试样本约定，暂无游戏样本
+├── docs/                  # 架构设计与验证路线
+└── reference/python/      # 原样保留的 15 个历史参考脚本
 ```
 
-### 资源打包 | Resource Packing (pak_packer)
+详细职责、依赖方向和下一步见 [架构设计](docs/architecture.md)。
 
-```bash
-pak_packer.exe <输入目录|input_directory> <输出文件路径|output_file_path>
+## 构建与测试
+
+需要支持 **C++17** 的编译器和 **CMake 3.20+**。当前无需 Python、FLTK、图像库或其他第三方依赖；构建不会下载依赖，也不会调用 Git。
+
+以下命令在项目根目录的 PowerShell 中运行。不同工具链使用不同构建目录，不共享 CMake 缓存。
+
+### MinGW
+
+将 `g++` 和 `mingw32-make` 所在目录加入当前终端 PATH：
+
+```powershell
+cmake -S . -B build/mingw -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+cmake --build build/mingw --parallel
+ctest --test-dir build/mingw --output-on-failure
+
+.\build\mingw\bin\eagls.exe --help
+.\build\mingw\bin\eagls.exe --version
 ```
 
-### 资源解包 | Resource Unpacking (pak_unpacker)
+运行 MinGW 编译的程序时，其运行库 DLL 也需要可被系统找到；开发机上通常由同一工具链的 PATH 提供。当前未制作独立发布包。
 
-```bash
-pak_unpacker.exe <pak文件路径|pak_file_path> <输出目录|output_directory> [解密|decrypt=1]
+### Visual Studio 2022
+
+需要安装 C++ 桌面开发工具与 Windows SDK；此生成器需要 CMake 3.21+：
+
+```powershell
+cmake -S . -B build/msvc -G "Visual Studio 17 2022" -A x64
+cmake --build build/msvc --config Release --parallel
+ctest --test-dir build/msvc -C Release --output-on-failure
+
+.\build\msvc\bin\Release\eagls.exe --help
 ```
 
-### Python 脚本 | Python Scripts
+### 仅构建核心
 
-#### 打包脚本 | Packing Script
-
-```bash
-python pack.py
+```powershell
+cmake -S . -B build/core-only -DEAGLS_BUILD_CLI=OFF -DBUILD_TESTING=OFF
+cmake --build build/core-only --config Release --parallel
 ```
 
-#### 解包脚本 | Unpacking Script
+| CMake 选项 | 默认值 | 作用 |
+| --- | --- | --- |
+| `EAGLS_BUILD_CLI` | `ON` | 构建 `eagls_cli` 目标，程序名为 `eagls` |
+| `BUILD_TESTING` | `ON` | 构建并注册测试；关闭 CLI 时仍可测试核心 |
 
-```bash
-python unpack.py <pak文件路径|pak_file_path> --output <输出目录|output_directory> [--no-decrypt]
-```
+核心目标为 `eagls_core`，供其他目标通过 `eagls::core` 链接。目前没有 GUI 构建开关，因为 GUI 尚未实现。
 
+## 当前 CLI 行为
 
-## ⚠️ 免责声明 | Disclaimer
+- 无参数、`--help`、`-h`：显示帮助，退出码 `0`。
+- `--version`：输出 `eagls` 和核心版本，退出码 `0`。
+- 未知参数、额外参数、尚未实现的命令：写入标准错误，退出码 `2`。
 
-本工具仅供学习和研究使用，请勿用于任何商业用途或侵犯他人知识产权的行为。使用本工具处理的任何资源，其版权仍归原作者所有。使用本工具所产生的任何法律责任由使用者自行承担，与本工具作者无关。
+当前测试只验证核心链接、版本一致性和 CLI 行为，**不代表已通过格式或游戏兼容性测试**。
 
-This tool is for educational and research purposes only. Do not use it for any commercial purposes or activities that infringe on others' intellectual property rights. The copyright of any resources processed using this tool remains with the original authors. Any legal responsibility arising from the use of this tool is borne by the user and is not related to the author of this tool.
+## 历史参考与样本
+
+- [参考脚本说明](reference/README.md)：仅供阅读，不属于构建、测试或运行时依赖。
+- [样本管理约定](tests/fixtures/README.md)：真实游戏资源在本地验证，不提交到仓库。
+
+## 许可证
+
+项目许可证见 [LICENSE](LICENSE)。游戏资源权利归原权利人；历史参考脚本的来源与许可需单独核实，不能仅凭放在本仓库内就推定其许可。
