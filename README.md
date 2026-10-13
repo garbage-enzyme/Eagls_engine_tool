@@ -1,5 +1,7 @@
 # EAGLS Engine Tool
 
+**中文** | [English](README.en.md)
+
 **面向 EAGLS 引擎游戏的资源提取与汉化工具集。原生 C++17 实现，命令行优先，无第三方依赖。**
 
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)
