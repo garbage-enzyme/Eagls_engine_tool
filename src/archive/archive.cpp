@@ -240,6 +240,8 @@ Archive Archive::open(const fs::path& index_path, const fs::path& pak_path) {
 
     detail::apply_index_cipher(index.data(), format::table_size, archive.seed_);
     archive.entries_ = parse_table(index.data(), pak_size);
+    // 保留解密后的槽位表作为回包模板；不含末尾 4 字节明文种子。
+    archive.table_.assign(index.begin(), index.end() - static_cast<std::ptrdiff_t>(format::seed_size));
     reject_duplicate_names(archive.entries_);
     archive.layout_ = compute_layout(archive.entries_, pak_size);
     return archive;

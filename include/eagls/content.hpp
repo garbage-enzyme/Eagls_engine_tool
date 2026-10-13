@@ -46,13 +46,37 @@ struct GrImage {
 [[nodiscard]] GrImage decode_gr(const std::vector<std::uint8_t>& data,
                                std::size_t max_image_bytes = content_format::default_image_limit);
 
-enum class ContentAction { decrypt_dat, extract_dat_text, decode_gr };
+// GR 编码选项。
+struct GrEncodeOptions {
+    // 为 true 时不做 LZSS 压缩，全部以字面量写出（文件更大，便于排查）。
+    bool store = false;
 
-// 单文件操作供 CLI/GUI 共用。先完成解码再写入，拒绝输入与输出为同一文件。
+    // 写入文件末尾的种子字节；只影响容器自洽，解码端会读取它。
+    std::uint8_t seed = 0;
+};
+
+// 把 24/32 位 BI_RGB BMP 编码为 GR：LZSS 压缩（或全字面量）、压缩流不足
+// 5963 字节时补零、前 5963 字节异或、末尾写入种子。
+[[nodiscard]] std::vector<std::uint8_t> encode_gr(const std::vector<std::uint8_t>& bitmap,
+                                                  const GrEncodeOptions& options = {});
+
+enum class ContentAction { decrypt_dat, extract_dat_text, decode_gr, encode_gr };
+
+// 单文件转换的选项。
+struct ContentConvertOptions {
+    // 为 true 时允许覆盖已存在的输出文件。
+    bool overwrite = false;
+
+    // 仅 encode_gr 使用：全字面量写出。
+    bool gr_store = false;
+};
+
+// 单文件操作供 CLI/GUI 共用。先完成转换再写入，拒绝输入与输出为同一文件。
 // 输出父目录不存在时创建；默认不覆盖，失败时不保留未写完的文件。
 // 正文导出移除标签表、终止 NUL 和种子，但保留原编码和换行。
 std::size_t convert_content_file(const std::filesystem::path& input,
                                  const std::filesystem::path& output,
-                                 ContentAction action, bool overwrite = false);
+                                 ContentAction action,
+                                 const ContentConvertOptions& options = {});
 
 }  // namespace eagls

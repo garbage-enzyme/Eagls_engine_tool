@@ -7,7 +7,7 @@
 - CLI 与未来 GUI 直接调用相同的 C++ 公共操作，不让 GUI 启动 CLI 后解析终端文字。
 - GUI 暂定 FLTK；本阶段不下载、不链接、不实现 GUI。
 - 真实资源、独立证据与游戏行为决定兼容性。历史代码仅能提供待验证线索。
-- 当前已实现 IDX/PAK 原样提取、DAT 解密/正文导出及 GR 到 BMP 解码；回包、内容编码和 GUI 仍是后续方向。
+- 当前已实现 IDX/PAK 原样提取与回包、DAT 解密/正文导出、GR 编解码；GUI 仍是后续方向。
 
 ## 2. 依赖方向
 
@@ -39,12 +39,11 @@ flowchart TD
 | `tests/` | 直接链接核心的测试，以及真实进程级 CLI 测试 |
 | `tests/fixtures/` | 合成样本约定与本地真实样本位置 |
 | `cmake/` | 项目自身的编译选项和版本生成模板 |
-| `reference/python/` | 未验证的历史参考；不参与生产构建、测试自动发现或安装 |
 
 目前使用的库内目录：
 
-- `src/archive/`：IDX/PAK 解析与容器模型。
-- `src/codec/`：DAT 解密与结构校验、GR 前缀解密/LZSS 和 BMP 导出规范化、PE32 解析与 EAGLS.exe 中文补丁定位。
+- `src/archive/`：IDX/PAK 解析、容器模型与回包重建。
+- `src/codec/`：DAT 解密与结构校验、GR 编码与解码（前缀加解密、LZSS、BMP 校验与规范化）、PE32 解析与 EAGLS.exe 中文补丁定位。
 - `src/operations/`：`convert_content_file`、文本清单编排与 exe 补丁文件操作，供 CLI/未来 GUI 共用。
 - `src/support/`：共享小端读写、MSVC 随机数、UTF-8 与文件读写/目标检查。
 - 图像、文本职责到对应功能开始时再细分，不先创建空目录和空类。
@@ -68,7 +67,7 @@ flowchart TD
 
 - `eagls_core`：静态核心库，别名 `eagls::core`，公开 C++17 要求。
 - `eagls_cli`：可选 CLI 目标，输出程序名 `eagls`，只链接核心。
-- `eagls_core_tests`：启用 `BUILD_TESTING` 时构建；不依赖 CLI 或 GUI。
+- `eagls_content_tests` / `eagls_exe_patch_tests`：启用 `BUILD_TESTING` 时构建；不依赖 CLI 或 GUI。
 - CLI 测试仅在 CLI 开启时注册。测试使用 CTest 和小型测试程序，无需下载测试框架。
 - `/W4 /permissive- /utf-8` 或 `-Wall -Wextra -Wpedantic` 仅应用于自有目标。
 - 根 `project(... VERSION ...)` 是版本号的唯一维护位置；生成配置只在构建目录内。
@@ -82,7 +81,7 @@ flowchart TD
 | 工程重启 | 目录、核心链接、CLI 骨架、测试入口 | 干净构建与骨架测试通过；不宣称已支持游戏 |
 | 首个资源闭环 | 取得真实 IDX/PAK、核实索引、列目录、原样提取 | 偏移与长度有独立依据，提取内容与 PAK 对应字节区间一致 |
 | 内容解码 | 分开验证解密、解压和 GR 图像解析 | 已知样本、独立实现或游戏加载结果交叉验证 |
-| 写回能力 | 回包与必要的文本回填 | 写入新文件后游戏能够识别，相关行为正常 |
+| 写回能力 | 回包与必要的文本回填 | 回包已实现：无替换/原样替换时重建产物与原文件逐字节一致，改内容替换可重新提取；游戏内加载验收待做 |
 | GUI 接入 | FLTK 调用已验证公共操作 | 交互不阻塞，复用 CLI 已验证的核心行为 |
 
 当前已验证炎孕人生（SQUEEZ，2006）三组 IDX/PAK、其中的 279 个 DAT 与 1,181 个 GR，以及 EAGLS.exe 的中文显示补丁（游戏内实测）；格式与补丁证据见 `eagls-archive.md` 和 `eagls-content.md`。其他版本不能直接套用。
@@ -93,4 +92,4 @@ flowchart TD
 
 经确认移除了旧 `bmp2gr/`、`pak_packer/`、`pak_unpacker/`、`eagls_engine_tool/`（包含 ImGui/libpng）、旧根 `build/`、`x64/` 和 `Eagls_engine_tool.sln`；重建了根 CMake 与 README。
 
-15 个 Python 脚本由 `python_script/` 原样迁移至 `reference/python/`，不修复、不执行。Git 目录、许可证、协作文件和用户编辑器配置保持原位。本次没有调用 Git、创建 Git 备份或安装依赖。
+15 个 Python 脚本已随 `reference/` 目录整体移除；验证过程中编写的通用校验脚本保留在未提交的 `build/` 下。Git 目录、许可证、协作文件和用户编辑器配置保持原位。本次没有调用 Git、创建 Git 备份或安装依赖。

@@ -27,12 +27,14 @@ void usage() {
     std::cout
         << "用法：eagls dat decrypt <文件或目录> --out DIR [--overwrite]\n"
         << "      eagls dat text    <文件或目录> --out DIR [--overwrite]\n"
-        << "      eagls gr decode   <文件或目录> --out DIR [--overwrite]\n\n"
+        << "      eagls gr decode   <文件或目录> --out DIR [--overwrite]\n"
+        << "      eagls gr encode   <文件或目录> --out DIR [--store] [--overwrite]\n\n"
         << "dat decrypt：保留标签表、终止符及种子的解密 DAT，不可直接回填游戏。\n"
         << "dat text：导出正文为 .txt，保留原始编码与换行，不自动转码。\n"
         << "gr decode：导出 24/32 位 BMP，修正大小字段并去除尾部填充。\n"
-        << "目录输入只处理当前层的同扩展名文件；--out 始终表示输出目录。\n"
-        << "默认不覆盖；不允许输出与输入指向同一文件。其他格式、编码与回包尚未实现。\n";
+        << "gr encode：把 24/32 位 BMP 编码为 .gr；--store 不压缩、全字面量写出。\n"
+        << "目录输入只处理当前层的匹配扩展名文件；--out 始终表示输出目录。\n"
+        << "默认不覆盖；不允许输出与输入指向同一文件。其他格式与编码尚未实现。\n";
 }
 
 int dispatch(const std::string& format, const std::vector<std::string>& args) {
@@ -46,21 +48,31 @@ int dispatch(const std::string& format, const std::vector<std::string>& args) {
     };
     if (args.empty()) return invalid();
     eagls::ContentAction action;
-    std::string extension;
+    // 输入过滤扩展名与输出扩展名可能不同（例如 gr encode：.bmp 输入、.gr 输出）。
+    std::string input_extension;
+    std::string output_extension;
     if (format == "dat" && args[0] == "decrypt") {
         action = eagls::ContentAction::decrypt_dat;
-        extension = ".dat";
+        input_extension = ".dat";
+        output_extension = ".dat";
     } else if (format == "dat" && args[0] == "text") {
         action = eagls::ContentAction::extract_dat_text;
-        extension = ".txt";
+        input_extension = ".dat";
+        output_extension = ".txt";
     } else if (format == "gr" && args[0] == "decode") {
         action = eagls::ContentAction::decode_gr;
-        extension = ".bmp";
+        input_extension = ".gr";
+        output_extension = ".bmp";
+    } else if (format == "gr" && args[0] == "encode") {
+        action = eagls::ContentAction::encode_gr;
+        input_extension = ".bmp";
+        output_extension = ".gr";
     } else {
         return invalid();
     }
     std::optional<fs::path> input, output;
     bool overwrite = false;
+    bool store = false;
     for (std::size_t i = 1; i < args.size(); ++i) {
         if (args[i] == "--out") {
             if (output || ++i == args.size() || args[i].empty() || args[i][0] == '-') return invalid();
@@ -68,6 +80,10 @@ int dispatch(const std::string& format, const std::vector<std::string>& args) {
         } else if (args[i] == "--overwrite") {
             if (overwrite) return invalid();
             overwrite = true;
+        } else if (args[i] == "--store") {
+            // 全字面量写出只在 gr encode 上有意义，其他动作遇到它按参数错误处理。
+            if (store || action != eagls::ContentAction::encode_gr) return invalid();
+            store = true;
         } else if (input || args[i].empty() || args[i][0] == '-') {
             return invalid();
         } else {
@@ -79,7 +95,8 @@ int dispatch(const std::string& format, const std::vector<std::string>& args) {
     std::vector<fs::path> files;
     if (fs::is_directory(*input)) {
         for (const auto& entry : fs::directory_iterator(*input)) {
-            if (entry.is_regular_file() && ascii_lower(entry.path().extension().u8string()) == "." + format) {
+            if (entry.is_regular_file() &&
+                ascii_lower(entry.path().extension().u8string()) == input_extension) {
                 files.push_back(entry.path());
             }
         }
@@ -96,7 +113,7 @@ int dispatch(const std::string& format, const std::vector<std::string>& args) {
     std::vector<fs::path> targets;
     std::unordered_set<std::string> names;
     for (const auto& file : files) {
-        const auto name = file.stem().u8string() + extension;
+        const auto name = file.stem().u8string() + output_extension;
         if (!names.insert(ascii_lower(name)).second) {
             throw eagls::Error(eagls::ErrorCode::duplicate_name, "多个输入映射到同一输出文件：" + name);
         }
@@ -113,9 +130,12 @@ int dispatch(const std::string& format, const std::vector<std::string>& args) {
         }
         targets.push_back(target);
     }
+    eagls::ContentConvertOptions options;
+    options.overwrite = overwrite;
+    options.gr_store = store;
     std::uint64_t total = 0;
     for (std::size_t i = 0; i < files.size(); ++i) {
-        total += eagls::convert_content_file(files[i], targets[i], action, overwrite);
+        total += eagls::convert_content_file(files[i], targets[i], action, options);
         std::cout << '[' << i + 1 << '/' << files.size() << "] " << targets[i].u8string() << '\n';
     }
     std::cout << "完成：写出 " << files.size() << " 个文件（" << total << " 字节）。\n";

@@ -121,6 +121,18 @@ struct ExtractResult {
     bool cancelled = false;
 };
 
+// 回包（repack）的结果统计。
+struct RepackResult {
+    // 从替换目录实际替换（重新写入）的条目数。
+    std::size_t replaced = 0;
+
+    // 归档里的条目总数。
+    std::size_t entries = 0;
+
+    // 写出的 .pak 字节数（即重建后数据文件的大小）。
+    std::uint64_t bytes_written = 0;
+};
+
 // 一个已打开的 IDX/PAK 归档。
 //
 // 打开时读取并解密整个索引（约 280 KB），校验每个条目，但不读取 .pak 内容。
@@ -148,6 +160,10 @@ public:
     [[nodiscard]] std::uint64_t pak_size() const noexcept { return pak_size_; }
 
     [[nodiscard]] const ArchiveLayout& layout() const noexcept { return layout_; }
+
+    // 打开时解密出的槽位表（table_size 字节，不含末尾 4 字节明文种子）。
+    // 回包以它为模板，未触及的原始字节（例如名称字段）保持原样。
+    [[nodiscard]] const std::vector<std::uint8_t>& decrypted_table() const noexcept { return table_; }
 
     [[nodiscard]] const std::filesystem::path& pak_path() const noexcept { return pak_path_; }
 
@@ -179,9 +195,25 @@ private:
 
     std::filesystem::path pak_path_;
     std::vector<ArchiveEntry> entries_;
+    std::vector<std::uint8_t> table_;  // 解密后的槽位表，见 decrypted_table()
     std::uint32_t seed_ = 0;
     std::uint64_t pak_size_ = 0;
     ArchiveLayout layout_;
 };
+
+// 用替换目录重建归档：目录中的文件名（忽略 ASCII 大小写）与条目一一对应，
+// 未出现在目录中的条目按原字节复制；索引以打开时解密出的槽位表为模板，
+// 只重写受影响的偏移与长度字段，末尾种子保持原值。
+//
+// 只有 layout().exact() 的归档才能回包——条目首尾相接、完全覆盖数据文件，
+// 这样「没有替换文件」时两个输出文件与原文件逐字节一致（已验证）。
+// 输出路径不能与任一输入相同，两个输出也不能指向同一路径；默认不覆盖。
+// 替换目录里每个普通文件都必须匹配到条目，未匹配或重复映射会明确报错。
+RepackResult repack_archive(const std::filesystem::path& index_path,
+                            const std::filesystem::path& pak_path,
+                            const std::filesystem::path& from_dir,
+                            const std::filesystem::path& out_index_path,
+                            const std::filesystem::path& out_pak_path,
+                            bool overwrite = false);
 
 }  // namespace eagls

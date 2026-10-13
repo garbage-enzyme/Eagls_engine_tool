@@ -3,11 +3,13 @@ add_library(eagls_core STATIC
     archive/archive.cpp
     archive/entry_name.cpp
     archive/index_cipher.cpp
+    archive/repack.cpp
     support/utf8.cpp
     support/file_io.cpp
     support/codepage.cpp
     support/json_mini.cpp
     codec/content.cpp
+    codec/gr_encode.cpp
     codec/text_map.cpp
     codec/pe_image.cpp
     codec/exe_patch.cpp

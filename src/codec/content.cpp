@@ -2,33 +2,15 @@
 #include <eagls/error.hpp>
 
 #include "codec/dat_cipher.hpp"
+#include "codec/gr_cipher.hpp"
 #include "support/bytes.hpp"
 #include "support/msvc_rand.hpp"
 
 #include <algorithm>
 #include <array>
-#include <string_view>
 
 namespace eagls {
 namespace {
-constexpr std::string_view key = "EAGLS_SYSTEM";
-
-// 按引擎 sub_422530 的 Schrage 分解实现，避免有符号乘法溢出。
-class GrRandom {
-public:
-    explicit GrRandom(std::uint8_t seed) : state_(seed ^ 123459876) {}
-
-    unsigned next() {
-        state_ = 48271 * (state_ % 44488) - 3399 * (state_ / 44488);
-        if (state_ <= 0) {
-            state_ += 2147483647;
-        }
-        return static_cast<unsigned>(static_cast<double>(state_) * 4.656612875245797e-10 * 256.0);
-    }
-
-private:
-    std::int32_t state_;
-};
 
 // 逐字节读取，保留跨请求的引用状态，允许输出终点落在最后一个匹配项中间。
 // 环形窗口初始为零，起点 0xFEE；位标志从低到高，1 为字面量。
@@ -126,10 +108,7 @@ GrImage decode_gr(const std::vector<std::uint8_t>& data, std::size_t max_image_b
         throw Error(ErrorCode::resource_limit, "图像输出上限不足以容纳 BMP 头。");
     }
     std::vector<std::uint8_t> compressed(data.begin(), data.end() - 1);
-    GrRandom random(data.back());
-    for (std::size_t i = 0; i < content_format::gr_encrypted_size; ++i) {
-        compressed[i] ^= static_cast<std::uint8_t>(key[random.next() % key.size()]);
-    }
+    detail::xor_gr_prefix(compressed.data(), content_format::gr_encrypted_size, data.back());
     GrLzssReader reader(compressed);
     GrImage result{};
     result.seed = data.back();
@@ -175,7 +154,8 @@ void xor_dat_body(std::vector<std::uint8_t>& data, std::uint8_t seed) {
     const int signed_seed = seed < 128 ? seed : static_cast<int>(seed) - 256;
     MsvcRand random(static_cast<std::uint32_t>(signed_seed));
     for (std::size_t i = content_format::dat_header_size; i < data.size() - 1; i += 2) {
-        data[i] ^= static_cast<std::uint8_t>(key[static_cast<std::size_t>(random.next()) % key.size()]);
+        data[i] ^=
+            static_cast<std::uint8_t>(content_key[static_cast<std::size_t>(random.next()) % content_key.size()]);
     }
 }
 

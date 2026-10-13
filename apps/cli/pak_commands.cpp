@@ -31,15 +31,22 @@ void print_usage() {
         << "子命令：\n"
         << "  info     显示归档信息（种子、条目数、数据大小、布局）\n"
         << "  list     列出全部条目（槽位、名称、物理偏移、大小）\n"
-        << "  extract  提取条目（可选择个别条目）\n\n"
+        << "  extract  提取条目（可选择个别条目）\n"
+        << "  repack   用 --from 目录中的文件替换条目并重建归档\n\n"
         << "extract 选项：\n"
         << "  --out DIR     输出目录（默认：<pak 所在目录>/<pak 主文件名>_out）\n"
         << "  --entry NAME  只提取指定条目，可重复；NAME 可带目录前缀，\n"
         << "                比较时只使用最后一个路径分隔符之后的部分\n"
         << "  --overwrite   允许覆盖输出目录中已存在的同名普通文件\n\n"
+        << "repack 选项：\n"
+        << "  --from DIR    替换文件目录（必填）；目录中每个普通文件都必须匹配到\n"
+        << "                一个条目（忽略 ASCII 大小写），未匹配或重复映射会失败\n"
+        << "  --out DIR     输出目录（默认：<pak 所在目录>/<pak 主文件名>_repack）\n"
+        << "  --overwrite   允许覆盖输出目录中已存在的同名普通文件\n\n"
         << "示例：\n"
         << "  eagls pak list Script\\SCPACK.idx Script\\SCPACK.pak\n"
-        << "  eagls pak extract Wave\\WAVEPACK.idx Wave\\WAVEPACK.pak --out out --entry loop.wav\n";
+        << "  eagls pak extract Wave\\WAVEPACK.idx Wave\\WAVEPACK.pak --out out --entry loop.wav\n"
+        << "  eagls pak repack Script\\SCPACK.idx Script\\SCPACK.pak --from patched\n";
 }
 
 // 把 32 位种子格式化为固定 8 位的大写十六进制文本。
@@ -104,6 +111,88 @@ bool parse_extract_options(const std::vector<std::string>& args, ExtractArgs& pa
 // 默认输出目录：<pak 所在目录>/<pak 主文件名>_out。
 fs::path default_output_dir(const fs::path& pak_path) {
     return pak_path.parent_path() / fs::u8path(pak_path.stem().u8string() + "_out");
+}
+
+// repack 子命令解析后的参数。
+struct RepackArgs {
+    fs::path idx_path;
+    fs::path pak_path;
+    fs::path from_dir;
+    std::optional<fs::path> output_dir;
+    bool overwrite = false;
+};
+
+// 解析 repack 的位置参数与选项；失败时把原因写入标准错误。
+bool parse_repack_options(const std::vector<std::string>& args, RepackArgs& parsed) {
+    std::vector<std::string> positional;
+    bool has_from = false;
+    for (std::size_t i = 1; i < args.size(); ++i) {
+        const std::string& item = args[i];
+        if (item == "--from") {
+            if (i + 1 >= args.size() || has_from) {
+                std::cerr << "错误：--from 缺少目录参数或重复指定。\n";
+                return false;
+            }
+            parsed.from_dir = fs::u8path(args[++i]);
+            has_from = true;
+        } else if (item == "--out") {
+            if (i + 1 >= args.size() || parsed.output_dir.has_value()) {
+                std::cerr << "错误：--out 缺少目录参数或重复指定。\n";
+                return false;
+            }
+            parsed.output_dir = fs::u8path(args[++i]);
+        } else if (item == "--overwrite") {
+            if (parsed.overwrite) {
+                std::cerr << "错误：--overwrite 重复指定。\n";
+                return false;
+            }
+            parsed.overwrite = true;
+        } else if (!item.empty() && item[0] == '-') {
+            std::cerr << "错误：未知选项 " << item << "。\n";
+            return false;
+        } else {
+            positional.push_back(item);
+        }
+    }
+    if (positional.size() != 2) {
+        std::cerr << "错误：需要恰好两个位置参数 <idx> <pak>，实际给出 " << positional.size() << " 个。\n";
+        return false;
+    }
+    if (!has_from) {
+        std::cerr << "错误：repack 需要 --from DIR 指定替换文件目录。\n";
+        return false;
+    }
+    parsed.idx_path = fs::u8path(positional[0]);
+    parsed.pak_path = fs::u8path(positional[1]);
+    return true;
+}
+
+// 默认输出目录：<pak 所在目录>/<pak 主文件名>_repack。
+fs::path default_repack_dir(const fs::path& pak_path) {
+    return pak_path.parent_path() / fs::u8path(pak_path.stem().u8string() + "_repack");
+}
+
+int run_repack(const std::vector<std::string>& args) {
+    RepackArgs parsed;
+    if (!parse_repack_options(args, parsed)) {
+        std::cerr << "请使用 eagls pak --help。\n";
+        return 2;
+    }
+
+    const fs::path output_dir =
+        parsed.output_dir.has_value() ? *parsed.output_dir : default_repack_dir(parsed.pak_path);
+    // 输出保持各自的输入主文件名；通常 idx 与 pak 同名。
+    const fs::path out_idx = output_dir / fs::u8path(parsed.idx_path.stem().u8string() + ".idx");
+    const fs::path out_pak = output_dir / fs::u8path(parsed.pak_path.stem().u8string() + ".pak");
+
+    std::cout << "正在用 " << parsed.from_dir.u8string() << " 中的文件重建 " << parsed.pak_path.u8string()
+              << " 到 " << output_dir.u8string() << '\n';
+    const eagls::RepackResult result = eagls::repack_archive(parsed.idx_path, parsed.pak_path, parsed.from_dir,
+                                                             out_idx, out_pak, parsed.overwrite);
+    std::cout << "完成：替换 " << result.replaced << '/' << result.entries << " 个条目，写出 "
+              << result.bytes_written << " 字节数据（" << out_idx.u8string() << " + " << out_pak.u8string()
+              << "）。\n";
+    return 0;
 }
 
 void print_info(const eagls::Archive& archive, const fs::path& idx_path, const fs::path& pak_path) {
@@ -223,6 +312,10 @@ int dispatch(const std::vector<std::string>& args) {
 
     if (command == "extract") {
         return run_extract(args);
+    }
+
+    if (command == "repack") {
+        return run_repack(args);
     }
 
     std::cerr << "错误：未知子命令 " << command << "。请使用 eagls pak --help。\n";

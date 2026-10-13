@@ -33,7 +33,7 @@
 
 namespace {
 
-// 顶层帮助。tests/cli_test.cmake 依赖其中必须出现的“用法：eagls”与“尚未实现”字样。
+// 顶层帮助。tests/cli_contract_test.cmake 依赖其中必须出现的「用法：eagls」与「尚未实现」字样。
 void print_help() {
     std::cout
         << "EAGLS Engine Tool（重启开发中）\n\n"
@@ -42,10 +42,12 @@ void print_help() {
         << "  eagls pak info    <idx> <pak>             显示归档信息\n"
         << "  eagls pak list    <idx> <pak>             列出全部条目\n"
         << "  eagls pak extract <idx> <pak> [选项]      提取条目\n"
+        << "  eagls pak repack  <idx> <pak> --from DIR [--out DIR]  用替换目录重建归档\n"
         << "  eagls pak --help                          显示 pak 子命令帮助\n"
         << "  eagls dat decrypt <文件或目录> --out DIR  导出解密 DAT\n"
         << "  eagls dat text    <文件或目录> --out DIR  导出原编码正文\n"
         << "  eagls gr decode   <文件或目录> --out DIR  导出标准 BMP\n"
+        << "  eagls gr encode   <文件或目录> --out DIR [--store]  把 BMP 编码为 GR\n"
         << "  eagls text extract <文件或目录> --out FILE.json  提取文本清单\n"
         << "  eagls text apply   <文件或目录> --table FILE.json --out DIR  回填重建 DAT\n"
         << "  eagls exe check   <EAGLS.exe>             检查 GBK 中文补丁位置与状态\n"
@@ -58,9 +60,13 @@ void print_help() {
         << "  --entry NAME  只提取指定条目，可重复；NAME 可带目录前缀，\n"
         << "                比较时只使用最后一个路径分隔符之后的部分\n"
         << "  --overwrite   允许覆盖输出目录中已存在的同名普通文件\n\n"
-        << "目前已实现 IDX/PAK 归档的信息查看、列目录与原样提取；\n"
-        << "已实现 DAT 解密/正文导出、GR 解码、文本清单的提取与回填，以及 EAGLS.exe 中文显示补丁；\n"
-        << "PAK 回包尚未实现。\n";
+        << "pak repack 选项：\n"
+        << "  --from DIR    替换文件目录（必填）；目录中每个文件都必须匹配到一个条目\n"
+        << "  --out DIR     输出目录（默认：<pak 所在目录>/<pak 主文件名>_repack）\n"
+        << "  --overwrite   允许覆盖输出目录中已存在的同名普通文件\n\n"
+        << "目前已实现 IDX/PAK 归档的信息查看、列目录、原样提取与替换回包；\n"
+        << "已实现 DAT 解密/正文导出、GR 解码与编码、文本清单的提取与回填，以及 EAGLS.exe 中文显示补丁；\n"
+        << "全量翻译工作流与 GUI 尚未实现。\n";
 }
 
 // 宽字符串转 UTF-8。
