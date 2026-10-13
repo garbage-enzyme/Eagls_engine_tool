@@ -1,6 +1,7 @@
 #include <eagls/content.hpp>
 #include <eagls/error.hpp>
 
+#include "codec/dat_cipher.hpp"
 #include "support/bytes.hpp"
 #include "support/msvc_rand.hpp"
 
@@ -92,12 +93,7 @@ DatScript decode_dat(const std::vector<std::uint8_t>& data) {
         throw Error(ErrorCode::truncated_data, "DAT 缺少完整标签表、终止符或种子。");
     }
     DatScript result{data, {}, data.back()};
-    // movsx byte -> srand：高位为 1 的种子必须先符号扩展，再作为 uint32 传入。
-    const int signed_seed = result.seed < 128 ? result.seed : static_cast<int>(result.seed) - 256;
-    detail::MsvcRand random(static_cast<std::uint32_t>(signed_seed));
-    for (std::size_t i = header_size; i < data.size() - 1; i += 2) {
-        result.decrypted[i] ^= static_cast<std::uint8_t>(key[static_cast<std::size_t>(random.next()) % key.size()]);
-    }
+    detail::xor_dat_body(result.decrypted, result.seed);
     const auto text_begin = result.decrypted.begin() + header_size;
     const auto text_end = result.decrypted.end() - 2;
     if (*text_end != 0 || std::find(text_begin, text_end, 0) != text_end) {
@@ -171,4 +167,17 @@ GrImage decode_gr(const std::vector<std::uint8_t>& data, std::size_t max_image_b
     detail::write_u32_le(result.bitmap.data() + 34, static_cast<std::uint32_t>(pixels));
     return result;
 }
+
+namespace detail {
+
+void xor_dat_body(std::vector<std::uint8_t>& data, std::uint8_t seed) {
+    // movsx byte -> srand：高位为 1 的种子必须先符号扩展，再作为 uint32 传入。
+    const int signed_seed = seed < 128 ? seed : static_cast<int>(seed) - 256;
+    MsvcRand random(static_cast<std::uint32_t>(signed_seed));
+    for (std::size_t i = content_format::dat_header_size; i < data.size() - 1; i += 2) {
+        data[i] ^= static_cast<std::uint8_t>(key[static_cast<std::size_t>(random.next()) % key.size()]);
+    }
+}
+
+}  // namespace detail
 }  // namespace eagls

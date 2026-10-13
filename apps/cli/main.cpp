@@ -9,6 +9,8 @@
 
 #include "pak_commands.hpp"
 #include "content_commands.hpp"
+#include "text_commands.hpp"
+#include "exe_commands.hpp"
 
 #include <eagls/version.hpp>
 
@@ -44,7 +46,11 @@ void print_help() {
         << "  eagls dat decrypt <文件或目录> --out DIR  导出解密 DAT\n"
         << "  eagls dat text    <文件或目录> --out DIR  导出原编码正文\n"
         << "  eagls gr decode   <文件或目录> --out DIR  导出标准 BMP\n"
-        << "  eagls dat --help / eagls gr --help         显示内容命令帮助\n"
+        << "  eagls text extract <文件或目录> --out FILE.json  提取文本清单\n"
+        << "  eagls text apply   <文件或目录> --table FILE.json --out DIR  回填重建 DAT\n"
+        << "  eagls exe check   <EAGLS.exe>             检查 GBK 中文补丁位置与状态\n"
+        << "  eagls exe patch   <EAGLS.exe> [--out FILE] [--overwrite]  写出补丁副本\n"
+        << "  eagls dat --help / eagls gr --help / eagls text --help / eagls exe --help  显示子命令帮助\n"
         << "  eagls --help                              显示本帮助\n"
         << "  eagls --version                           显示核心版本\n\n"
         << "pak extract 选项：\n"
@@ -53,7 +59,8 @@ void print_help() {
         << "                比较时只使用最后一个路径分隔符之后的部分\n"
         << "  --overwrite   允许覆盖输出目录中已存在的同名普通文件\n\n"
         << "目前已实现 IDX/PAK 归档的信息查看、列目录与原样提取；\n"
-        << "已实现 DAT 解密/正文导出及 GR 解码；文本回填与回包尚未实现。\n";
+        << "已实现 DAT 解密/正文导出、GR 解码、文本清单的提取与回填，以及 EAGLS.exe 中文显示补丁；\n"
+        << "PAK 回包尚未实现。\n";
 }
 
 // 宽字符串转 UTF-8。
@@ -123,6 +130,16 @@ int main() {
     if (arguments[0] == "dat" || arguments[0] == "gr") {
         const std::vector<std::string> rest(arguments.begin() + 1, arguments.end());
         return cli::run_content_command(arguments[0], rest);
+    }
+
+    if (arguments[0] == "text") {
+        const std::vector<std::string> rest(arguments.begin() + 1, arguments.end());
+        return cli::run_text_command(rest);
+    }
+
+    if (arguments[0] == "exe") {
+        const std::vector<std::string> rest(arguments.begin() + 1, arguments.end());
+        return cli::run_exe_command(rest);
     }
 
     // 未实现的命令与非法参数明确失败，不返回伪成功。

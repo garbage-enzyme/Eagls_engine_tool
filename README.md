@@ -1,6 +1,6 @@
 # EAGLS Engine Tool
 
-> **项目正在重启中。核心归档层（IDX/PAK 读取与原样提取）与 CLI 已实现，并在首组真实样本上完成全量提取与独立 SHA-256 交叉校验；内容解密、图像编解码、文本回填与回包尚未实现。**
+> **项目正在重启中。核心归档层（IDX/PAK 读取与原样提取）与 CLI 已实现，并在首组真实样本上完成全量提取与独立 SHA-256 交叉校验；DAT 解密/原编码正文导出、GR 到 BMP 解码、文本清单提取/回填（含 GBK 译文）与 EAGLS.exe 中文显示补丁已实现，1,739 个内容输出通过独立交叉验证，补丁已通过游戏内中文显示验证；GR 编码与 PAK 回包尚未实现。**
 >
 > 旧 C++ 移植代码、旧可执行程序及分散的工程文件已经移除。旧版使用说明不再适用，请勿把历史版本或构建成功视为资源处理正确的证明；格式结论以 [归档格式证据](docs/eagls-archive.md) 为准。
 
@@ -13,11 +13,12 @@
 | C++17 核心静态库、统一 CMake、CTest | MinGW 与 MSVC（Release）均构建并通过测试 |
 | CLI：帮助、版本、`pak info`/`list`/`extract` | 已实现 |
 | IDX/PAK 检查、列目录、原样提取 | 已实现；首组样本 5,022 个条目全量提取，独立 SHA-256 交叉校验通过 |
-| 内容解密、GR 图像编解码、文本回填、回包 | 未实现 |
+| DAT 解密 / 原编码正文导出、GR 到 BMP | 已实现；279 个 DAT、1,181 张 GR 完成独立验证 |
+| 文本清单提取 / 回填（cp932 原文、gbk 译文） | 已实现；a001.dat 中文版通过游戏内显示验证 |
+| EAGLS.exe 中文显示补丁（`exe check` / `exe patch`） | 已实现；6 字节补丁，MinGW/MSVC 产物 |
+| GR 编码、PAK 回包 | 未实现 |
 | GUI | 暂定 FLTK，尚未接入 |
-| 真实游戏兼容性 | 仅炎孕人生（SQUEEZ，2006）三组归档完成验证；其他版本未验证 |
-
-不以旧 C++ 或参考 Python 的输出作为正确性标准，也不把程序内部往返自洽等同于游戏兼容。
+| 真实游戏兼容性 | 仅炎孕人生（SQUEEZ，2006）三组归档与 EAGLS.exe 中文补丁完成验证；其他版本未验证 |
 
 ## 目录
 
@@ -93,10 +94,21 @@ cmake --build build/core-only --config Release --parallel
 - `eagls pak list <idx> <pak>`：列出全部条目（槽位、名称、物理偏移、大小）。
 - `eagls pak extract <idx> <pak> [--out DIR] [--entry NAME]... [--overwrite]`：按索引原样提取条目；
   默认输出到 `<pak 所在目录>/<pak 主文件名>_out`，`--entry` 可重复并可带目录前缀。
-- 未知参数、额外参数、尚未实现的命令、参数用法错误：写入标准错误，退出码 `2`；归档或提取失败：退出码 `1`。
+- `eagls dat decrypt <文件或目录> --out DIR [--overwrite]`：导出保留标签表/终止符/种子的解密 DAT，不能直接回填游戏。
+- `eagls dat text <文件或目录> --out DIR [--overwrite]`：导出 `.txt` 正文，保留原编码与换行，不自动转码。
+- `eagls gr decode <文件或目录> --out DIR [--overwrite]`：导出 24/32 位 BMP；修正大小字段，丢弃像素后的填充。
+- `eagls text extract <文件或目录> --out FILE.json [--overwrite]`：提取含日文文本与说话者的 JSON 清单。
+- `eagls text apply <文件或目录> --table FILE.json --out DIR [--overwrite] [--encoding cp932|gbk]`：按清单重建加密 DAT；译文可用 GBK（配合 exe 补丁）。
+- `eagls exe check <EAGLS.exe>`：定位 GBK 中文补丁位置并报告当前状态，不写文件。
+- `eagls exe patch <EAGLS.exe> [--out FILE] [--overwrite]`：写出补丁副本（默认 `<主文件名>-cn.exe`），拒绝覆盖输入本身。
+- 内容命令的 `--out` 始终表示目录，目录输入只处理当前层的相应扩展名；不允许就地覆盖输入。
+- 未知参数、额外参数、尚未实现的命令、参数用法错误：写入标准错误，退出码 `2`；归档、解码或写入失败：退出码 `1`。
 
-自动化测试目前只覆盖工程骨架、版本一致性和 CLI 基本行为；归档提取的正确性由独立脚本
-对首组真实样本全量核对（见 [归档格式证据](docs/eagls-archive.md)），**不代表已通过全部游戏的兼容性测试**。
+默认 CTest 包含 27 项（版本、解码与 exe 补丁边界、CLI 参数），不需要真实游戏资源。
+将 `EAGLS_LOCAL_CONTENT_DIR` 显式设为已提取样本的绝对路径后，额外启用两项真实样本回归
+（内容解码与损坏输入、EXE 补丁端到端并校验产物 SHA-256），共 29 项。
+归档提取和内容解码另有全量独立校验，见 [归档证据](docs/eagls-archive.md) 与 [DAT/GR 证据及复验命令](docs/eagls-content.md)。
+Python 只用于手动交叉验证，不是核心/CLI/默认 CTest 的依赖。**这不代表全部游戏版本兼容或回填游戏验收。**
 
 ## 历史参考与样本
 

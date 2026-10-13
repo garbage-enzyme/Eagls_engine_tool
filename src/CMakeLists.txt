@@ -5,8 +5,15 @@ add_library(eagls_core STATIC
     archive/index_cipher.cpp
     support/utf8.cpp
     support/file_io.cpp
+    support/codepage.cpp
+    support/json_mini.cpp
     codec/content.cpp
+    codec/text_map.cpp
+    codec/pe_image.cpp
+    codec/exe_patch.cpp
     operations/content_file.cpp
+    operations/text_workflow.cpp
+    operations/exe_patch_file.cpp
 )
 add_library(eagls::core ALIAS eagls_core)
 
