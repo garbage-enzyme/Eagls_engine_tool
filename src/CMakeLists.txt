@@ -13,6 +13,7 @@ add_library(eagls_core STATIC
     codec/text_map.cpp
     codec/pe_image.cpp
     codec/exe_patch.cpp
+    codec/exe_typography.cpp
     operations/content_file.cpp
     operations/text_workflow.cpp
     operations/exe_patch_file.cpp

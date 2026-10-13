@@ -22,7 +22,7 @@ namespace {
 
 constexpr std::size_t header_size = content_format::dat_header_size;
 
-// 源文本编码：炎孕人生（SQUEEZ 2006）正文为 CP932；仅此一个已验收样本。
+// 源文本编码：（SQUEEZ 2006）正文为 CP932；仅此一个已验收样本。
 constexpr unsigned source_codepage = 932;
 
 std::string ascii_lower(std::string value) {

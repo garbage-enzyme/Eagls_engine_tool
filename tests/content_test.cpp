@@ -237,7 +237,7 @@ void verify_local(const fs::path& root, const fs::path& scratch) {
     const auto exe_report = eagls::inspect_exe_patch(exe);
     require(exe_report.sites.size() == 6 && exe_report.state == eagls::ExePatchState::original);
     require(exe_report.sites.front().file_offset == 0x1909 &&
-            exe_report.sites.front().patched_value == 0xFE);
+            exe_report.sites.front().patched_bytes == std::vector<std::uint8_t>{0xFE});
     require(exe_report.sites.back().file_offset == 0xA118);
     const auto exe_patched = eagls::apply_exe_patch(exe);
     require(exe_patched.size() == exe.size());
@@ -249,6 +249,21 @@ void verify_local(const fs::path& root, const fs::path& scratch) {
     require(eagls::inspect_exe_patch(exe_patched).state == eagls::ExePatchState::patched);
     require(expect_error(ErrorCode::invalid_content,
                          [&] { (void)eagls::apply_exe_patch(exe_patched); }));
+
+    // 中文排版模式：原版直出与旧 GBK 补丁升级必须相同，真实字体槽位与代码块共 26 处。
+    const auto typography = eagls::ExePatchTarget::gbk_zh_cn;
+    const auto typography_report = eagls::inspect_exe_patch(exe, typography);
+    require(typography_report.sites.size() == 26);
+    require(eagls::inspect_exe_patch(exe_patched, typography).state == eagls::ExePatchState::base_patched);
+    const auto layout_patched = eagls::apply_exe_patch(exe, typography);
+    require(layout_patched.size() == exe.size());
+    require(eagls::apply_exe_patch(exe_patched, typography) == layout_patched);
+    require(eagls::inspect_exe_patch(layout_patched, typography).state == eagls::ExePatchState::patched);
+    std::vector<bool> permitted(exe.size(), false);
+    for (const auto& site : typography_report.sites) {
+        for (std::size_t i = 0; i < site.patched_bytes.size(); ++i) permitted.at(site.file_offset + i) = true;
+    }
+    for (std::size_t i = 0; i < exe.size(); ++i) require(permitted[i] || exe[i] == layout_patched[i]);
 }
 }  // namespace
 

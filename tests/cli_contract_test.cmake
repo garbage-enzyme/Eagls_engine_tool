@@ -34,9 +34,12 @@ set(pak_cases
 )
 
 set(exe_cases
-    "exe_help|0|用法：eagls|exe --help"
+    "exe_help|0|用法：eagls+--typography zh-cn+SimHei/SimSun|exe --help"
     "exe_check_out_rejected|2||exe check sample.exe --out a"
     "exe_check_missing_file|1||exe check __no_such_file__.exe"
+    "exe_typography_missing|2||exe patch sample.exe --typography"
+    "exe_typography_unknown|2||exe patch sample.exe --typography unknown"
+    "exe_typography_duplicate|2||exe check sample.exe --typography zh-cn --typography zh-cn"
 )
 
 if(GROUP STREQUAL "exe_local")
@@ -52,6 +55,43 @@ if(GROUP STREQUAL "exe_local")
     file(SHA256 "${OUTPUT}" actual_hash)
     if(NOT actual_hash STREQUAL "c86cceb5fdd195cad415fa22c98d5018c8935dcc6c0257d16e0f9c538e1ef4b6")
         message(FATAL_ERROR "补丁产物 SHA-256 不符：${actual_hash}")
+    endif()
+    # 中文排版属于同一门控测试，不增加 CTest 条目；同时覆盖 check、直出和升级。
+    function(run_typography expected_exit required_text)
+        execute_process(COMMAND "${CLI}" exe ${ARGN}
+            RESULT_VARIABLE code OUTPUT_VARIABLE text ERROR_VARIABLE err ENCODING UTF-8 TIMEOUT 20)
+        if(NOT "${code}" STREQUAL "${expected_exit}")
+            message(FATAL_ERROR "中文排版命令退出码不符：${ARGN}；${code}；${text}；${err}")
+        endif()
+        if(expected_exit EQUAL 0)
+            string(FIND "${text}" "${required_text}" position)
+            if(NOT err STREQUAL "" OR position LESS 0)
+                message(FATAL_ERROR "中文排版成功输出不符：${text}；${err}")
+            endif()
+        elseif(NOT text STREQUAL "" OR err STREQUAL "")
+            message(FATAL_ERROR "中文排版失败必须只写标准错误：${text}；${err}")
+        endif()
+    endfunction()
+    file(SHA256 "${SAMPLE}" sample_before)
+    run_typography(0 "原版" check "${SAMPLE}" --typography zh-cn)
+    run_typography(0 "可升级中文排版" check "${OUTPUT}" --typography zh-cn)
+    run_typography(0 "已写出" patch "${SAMPLE}" --out "${OUTPUT}.layout.exe" --typography zh-cn --overwrite)
+    run_typography(0 "已写出" patch "${OUTPUT}" --out "${OUTPUT}.upgrade.exe" --typography zh-cn --overwrite)
+    file(SHA256 "${OUTPUT}.layout.exe" layout_hash)
+    file(SHA256 "${OUTPUT}.upgrade.exe" upgrade_hash)
+    if(NOT layout_hash STREQUAL "dad2d5dba3452b0e3dff1b269953adc4084575d45dab66422753ed30cf75e829"
+       OR NOT layout_hash STREQUAL upgrade_hash)
+        message(FATAL_ERROR "中文排版哈希或升级一致性不符：${layout_hash}；${upgrade_hash}")
+    endif()
+    run_typography(0 "已打补丁" check "${OUTPUT}.layout.exe" --typography zh-cn)
+    file(REMOVE "${OUTPUT}.rejected.exe")
+    run_typography(1 "" patch "${OUTPUT}.layout.exe" --out "${OUTPUT}.rejected.exe" --typography zh-cn)
+    if(EXISTS "${OUTPUT}.rejected.exe")
+        message(FATAL_ERROR "重复补丁失败后留下了输出文件")
+    endif()
+    file(SHA256 "${SAMPLE}" sample_after)
+    if(NOT sample_before STREQUAL sample_after)
+        message(FATAL_ERROR "真实 EXE 样本被修改")
     endif()
     return()
 endif()

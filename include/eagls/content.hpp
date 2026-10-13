@@ -40,7 +40,7 @@ struct GrImage {
     std::uint8_t seed;
 };
 
-// 已验证的炎孕人生格式；无文件操作，不转码，不修改传入的原始字节。
+// 已验证的游戏格式；无文件操作，不转码，不修改传入的原始字节。
 // 格式、截断和上限错误通过 eagls::Error 报告。
 [[nodiscard]] DatScript decode_dat(const std::vector<std::uint8_t>& data);
 [[nodiscard]] GrImage decode_gr(const std::vector<std::uint8_t>& data,

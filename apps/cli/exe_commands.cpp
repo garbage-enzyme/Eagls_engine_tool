@@ -22,6 +22,8 @@ const char* state_text(eagls::ExePatchState state) {
         return "原版（未打补丁）";
     case eagls::ExePatchState::patched:
         return "已打补丁";
+    case eagls::ExePatchState::base_patched:
+        return "仅基础 GBK 补丁（可升级中文排版）";
     case eagls::ExePatchState::mixed:
         return "部分修改（文件可能被其他工具改动过）";
     }
@@ -34,6 +36,10 @@ const char* kind_text(eagls::ExePatchSiteKind kind) {
         return "前导字节判定";
     case eagls::ExePatchSiteKind::font_charset:
         return "字体字符集";
+    case eagls::ExePatchSiteKind::font_face:
+        return "字体名称";
+    case eagls::ExePatchSiteKind::typography_code:
+        return "中文禁则/字距指令块";
     }
     return "未知";
 }
@@ -56,23 +62,38 @@ std::string hex_byte(std::uint8_t value) {
     return buffer;
 }
 
+std::string hex_bytes(const std::vector<std::uint8_t>& bytes) {
+    std::string text;
+    for (std::size_t i = 0; i < bytes.size() && i < 14; ++i) {
+        if (i != 0) text += ' ';
+        text += hex_byte(bytes[i]);
+    }
+    if (bytes.size() > 14) text += " ...";
+    return text;
+}
+
 void print_sites(const eagls::ExePatchReport& report) {
     for (const auto& site : report.sites) {
         std::cout << "  VA " << hex_va(site.instruction_va) << "  " << kind_text(site.kind)
                   << "  文件偏移 " << hex_offset(site.file_offset) << "："
-                  << hex_byte(site.original_value) << " -> " << hex_byte(site.patched_value)
-                  << '\n';
+                  << hex_bytes(site.current_bytes) << " -> " << hex_bytes(site.patched_bytes);
+        if (site.current_bytes.size() > 1) {
+            std::cout << "（" << site.current_bytes.size() << " 字节）";
+        }
+        std::cout << '\n';
     }
 }
 
 void usage() {
     std::cout
-        << "用法：eagls exe check <EAGLS.exe>\n"
-        << "      eagls exe patch <EAGLS.exe> [--out FILE] [--overwrite]\n\n"
-        << "exe check：定位 GBK 中文补丁位置并报告当前状态，不写文件。\n"
+        << "用法：eagls exe check <EAGLS.exe> [--typography zh-cn]\n"
+        << "      eagls exe patch <EAGLS.exe> [--out FILE] [--overwrite] [--typography zh-cn]\n\n"
+        << "exe check：定位所选补丁位置并报告当前状态，不写文件。\n"
         << "exe patch：写出补丁副本；默认 <主文件名>-cn.exe，拒绝覆盖输入文件本身。\n"
-        << "补丁同时修改字体字符集与双字节判定，使 GBK 译文正确显示；\n"
-        << "文本请用 text apply --encoding gbk 打包。目前仅炎孕人生 EAGLS.exe 经游戏内验证。\n";
+        << "默认仍是已游戏内验证的 6 字节 GBK 补丁，配合 text apply --encoding gbk。\n"
+        << "--typography zh-cn：另换用 SimHei/SimSun、中文行首禁则及标点字距分类；\n"
+        << "可升级旧 GBK 补丁，仅支持已识别的游戏版本。沿用原紧缩系数与单次悬挂；\n"
+        << "不含行尾禁则或连续标点成组处理，新增排版效果仍需游戏内验收。\n";
 }
 
 int invalid() {
@@ -93,6 +114,7 @@ int dispatch(const std::vector<std::string>& args) {
     std::optional<fs::path> input;
     std::optional<fs::path> out;
     bool overwrite = false;
+    bool typography = false;
     for (std::size_t i = 1; i < args.size(); ++i) {
         if (args[i] == "--out") {
             if (out || ++i == args.size() || args[i].empty() || args[i][0] == '-') return invalid();
@@ -100,6 +122,9 @@ int dispatch(const std::vector<std::string>& args) {
         } else if (args[i] == "--overwrite") {
             if (overwrite) return invalid();
             overwrite = true;
+        } else if (args[i] == "--typography") {
+            if (typography || ++i == args.size() || args[i] != "zh-cn") return invalid();
+            typography = true;
         } else if (input || args[i].empty() || args[i][0] == '-') {
             return invalid();
         } else {
@@ -107,10 +132,11 @@ int dispatch(const std::vector<std::string>& args) {
         }
     }
     if (!input) return invalid();
+    const auto profile = typography ? eagls::ExePatchTarget::gbk_zh_cn : eagls::ExePatchTarget::gbk;
 
     if (check) {
         if (out || overwrite) return invalid();
-        const auto report = eagls::inspect_exe_file(*input);
+        const auto report = eagls::inspect_exe_file(*input, profile);
         print_sites(report);
         std::cout << "补丁位置共 " << report.sites.size() << " 处；状态：" << state_text(report.state)
                   << "。\n";
@@ -127,10 +153,13 @@ int dispatch(const std::vector<std::string>& args) {
         if (extension.empty()) extension = ".exe";
         target = input->parent_path() / fs::u8path(stem + "-cn" + extension);
     }
-    const auto report = eagls::patch_exe_file(*input, target, overwrite);
+    const auto report = eagls::patch_exe_file(*input, target, overwrite, profile);
     std::cout << "已按 " << report.sites.size() << " 个位置写出补丁副本：\n";
     print_sites(report);
     std::cout << "已写出：" << target.u8string() << '\n';
+    if (typography) {
+        std::cout << "中文排版使用 SimHei/SimSun；沿用原紧缩系数与单次悬挂，游戏内效果待验收。\n";
+    }
     return 0;
 }
 }  // namespace

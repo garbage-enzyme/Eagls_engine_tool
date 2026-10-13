@@ -1,7 +1,6 @@
 // EAGLS.exe 中文显示补丁的定位与应用。
 //
 // 不依赖固定偏移：在可执行节中按特征码定位两类硬编码。
-// 特征由炎孕人生 EAGLS.exe（SHA-256 9da97c35…358aa74c）的 IDA 分析得出，
 // 定位结果先与 IA-32 指令语义逐字节核对，再用于修改；命中数不符时明确失败，
 // 绝不在未识别的文件上落字节。
 #include <eagls/exe_patch.hpp>
@@ -9,6 +8,7 @@
 #include <eagls/error.hpp>
 
 #include "codec/pe_image.hpp"
+#include "codec/exe_typography_profile.hpp"
 
 #include <algorithm>
 #include <array>
@@ -51,6 +51,7 @@ struct TargetValues {
 TargetValues values_of(ExePatchTarget target) {
     switch (target) {
     case ExePatchTarget::gbk:
+    case ExePatchTarget::gbk_zh_cn:
         return {0x86, 0xFE};  // GB2312_CHARSET + GBK 前导字节上界
     }
     throw Error(ErrorCode::invalid_content, "未知的补丁目标。");
@@ -99,9 +100,9 @@ ExePatchSite make_site(const PeImage& image, const CodeHit& hit, std::size_t byt
     site.instruction_va = image.file_offset_to_va(
         *hit.section, hit.section->raw_offset + hit.offset + instruction_in_hit);
     site.file_offset = static_cast<std::uint32_t>(file_offset);
-    site.original_value = original;
-    site.patched_value = patched;
-    site.current_value = bytes[file_offset];
+    site.original_bytes = {original};
+    site.patched_bytes = {patched};
+    site.current_bytes = {bytes[file_offset]};
     return site;
 }
 
@@ -166,6 +167,12 @@ ExePatchReport inspect_impl(const std::vector<std::uint8_t>& bytes, ExePatchTarg
                         std::to_string(charset_count) + " 处）。");
     }
 
+    const std::size_t base_count = report.sites.size();
+    const bool base_patched = std::all_of(report.sites.begin(), report.sites.end(),
+        [](const ExePatchSite& site) { return site.current_bytes == site.patched_bytes; });
+    if (target == ExePatchTarget::gbk_zh_cn) {
+        detail::typography::append_sites(bytes, image, report);
+    }
     std::sort(report.sites.begin(), report.sites.end(),
               [](const ExePatchSite& a, const ExePatchSite& b) {
                   return a.file_offset < b.file_offset;
@@ -173,10 +180,15 @@ ExePatchReport inspect_impl(const std::vector<std::uint8_t>& bytes, ExePatchTarg
 
     std::size_t original_count = 0;
     std::size_t patched_count = 0;
+    std::size_t previous_end = 0;
     for (const auto& site : report.sites) {
-        if (site.current_value == site.original_value) {
+        if (site.file_offset < previous_end) {
+            throw Error(ErrorCode::invalid_content, "补丁字节块重叠，无法应用。");
+        }
+        previous_end = site.file_offset + site.current_bytes.size();
+        if (site.current_bytes == site.original_bytes) {
             ++original_count;
-        } else if (site.current_value == site.patched_value) {
+        } else if (site.current_bytes == site.patched_bytes) {
             ++patched_count;
         }
     }
@@ -184,6 +196,9 @@ ExePatchReport inspect_impl(const std::vector<std::uint8_t>& bytes, ExePatchTarg
         report.state = ExePatchState::original;
     } else if (patched_count == report.sites.size()) {
         report.state = ExePatchState::patched;
+    } else if (target == ExePatchTarget::gbk_zh_cn && base_patched &&
+               patched_count == base_count && original_count + patched_count == report.sites.size()) {
+        report.state = ExePatchState::base_patched;
     } else {
         report.state = ExePatchState::mixed;
     }
@@ -202,13 +217,14 @@ std::vector<std::uint8_t> apply_exe_patch(const std::vector<std::uint8_t>& image
     if (report.state == ExePatchState::patched) {
         throw Error(ErrorCode::invalid_content, "输入文件已经是打过补丁的版本。");
     }
-    if (report.state != ExePatchState::original) {
+    if (report.state != ExePatchState::original && report.state != ExePatchState::base_patched) {
         throw Error(ErrorCode::invalid_content,
                     "输入文件的补丁位置状态不一致，拒绝在未识别的文件上继续修改。");
     }
     std::vector<std::uint8_t> patched = image;
     for (const auto& site : report.sites) {
-        patched[site.file_offset] = site.patched_value;
+        std::copy(site.patched_bytes.begin(), site.patched_bytes.end(),
+                  patched.data() + site.file_offset);
     }
     // 复核：重新定位并逐字节确认，任何不一致都不允许写盘。
     if (inspect_impl(patched, target).state != ExePatchState::patched) {

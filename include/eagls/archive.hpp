@@ -12,8 +12,7 @@
 namespace eagls {
 
 // EAGLS 的 IDX/PAK 归档由一个索引文件（.idx）和一个数据文件（.pak）组成。
-//
-// 下列常量都有真实样本作为证据（炎孕人生，SQUEEZ，2006，共三组归档），
+//，
 // 证据与验证方法见 docs/eagls-archive.md。其他游戏或其他引擎版本是否沿用
 // 同一格式尚未验证，遇到不符的文件时会明确报错，而不是猜测另一种布局。
 namespace archive_format {

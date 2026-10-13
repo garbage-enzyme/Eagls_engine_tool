@@ -3,7 +3,7 @@ target_link_libraries(eagls_content_tests PRIVATE eagls::core)
 eagls_configure_target(eagls_content_tests)
 add_test(NAME core.content_boundaries COMMAND eagls_content_tests)
 
-add_executable(eagls_exe_patch_tests exe_patch_test.cpp)
+add_executable(eagls_exe_patch_tests exe_patch_test.cpp exe_typography_test.cpp)
 target_link_libraries(eagls_exe_patch_tests PRIVATE eagls::core)
 eagls_configure_target(eagls_exe_patch_tests)
 add_test(NAME core.exe_patch COMMAND eagls_exe_patch_tests)

@@ -1,5 +1,5 @@
 // exe 补丁定位与应用的单元测试：构造带目标特征的最小 PE32 映像。
-// 不需要游戏资源；真实 EAGLS.exe 的回归由 content_test.cpp 的本地样本分支负责。
+// 不需要完整游戏资源；真实 EAGLS.exe 的回归由内容测试与门控 CLI 契约负责。
 #include <eagls/error.hpp>
 #include <eagls/exe_patch.hpp>
 
@@ -8,6 +8,8 @@
 #include <iostream>
 #include <stdexcept>
 #include <vector>
+
+void verify_typography(const std::vector<std::uint8_t>& base);
 
 namespace {
 
@@ -100,6 +102,7 @@ Bytes build_image() {
 int main() {
     try {
         const Bytes original = build_image();
+        verify_typography(original);
 
         // 定位：6 处、升序、原版状态。
         const auto report = eagls::inspect_exe_patch(original);
