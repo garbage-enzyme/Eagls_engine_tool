@@ -15,7 +15,9 @@ enum class ErrorCode {
     entry_not_found,     // 请求的条目序号不存在
     unsafe_name,         // 条目名不能安全地作为输出目录下的单个文件名
     output_exists,       // 输出位置已有内容且未允许覆盖
-    truncated_data,      // 读取时数据文件比索引声明的短（打开之后被改动过）
+    truncated_data,      // 读取内容不足以完成解析或解压
+    invalid_content,     // DAT/GR 内容不符合当前支持的格式
+    resource_limit,      // 图像尺寸或文件大小超过工具的资源上限
 };
 
 // 核心库抛出的唯一异常类型。核心不打印日志、不弹窗、不终止进程，

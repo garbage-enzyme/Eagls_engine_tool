@@ -5,6 +5,8 @@
 #include "archive/entry_name.hpp"
 #include "archive/index_cipher.hpp"
 #include "support/utf8.hpp"
+#include "support/bytes.hpp"
+#include "support/file_io.hpp"
 
 #include <algorithm>
 #include <fstream>
@@ -46,34 +48,10 @@ std::string hex_text(const std::uint8_t* data, std::size_t size) {
     return text;
 }
 
-// 显式按小端读取，不依赖主机字节序，也不把文件字节强转成结构体。
-std::uint32_t read_u32_le(const std::uint8_t* bytes) noexcept {
-    return static_cast<std::uint32_t>(bytes[0]) |
-           (static_cast<std::uint32_t>(bytes[1]) << 8) |
-           (static_cast<std::uint32_t>(bytes[2]) << 16) |
-           (static_cast<std::uint32_t>(bytes[3]) << 24);
-}
+using detail::read_u32_le;
 
 // 确认路径指向存在的普通文件并返回大小，这样才能给出明确的中文原因。
-std::uint64_t regular_file_size(const fs::path& path, const std::string& role) {
-    std::error_code ec;
-    const fs::file_status status = fs::status(path, ec);
-    if (status.type() == fs::file_type::not_found) {
-        throw Error(ErrorCode::io, role + "不存在：" + path_text(path));
-    }
-    if (ec) {
-        throw Error(ErrorCode::io, role + "无法访问：" + path_text(path) + error_code_text(ec));
-    }
-    if (!fs::is_regular_file(status)) {
-        throw Error(ErrorCode::io, role + "不是普通文件：" + path_text(path));
-    }
-
-    const std::uintmax_t size = fs::file_size(path, ec);
-    if (ec) {
-        throw Error(ErrorCode::io, "无法获取" + role + "的大小：" + path_text(path) + error_code_text(ec));
-    }
-    return static_cast<std::uint64_t>(size);
-}
+using detail::regular_file_size;
 
 std::vector<std::uint8_t> read_index_file(const fs::path& path) {
     const std::uint64_t size = regular_file_size(path, "索引文件");
@@ -220,22 +198,7 @@ void read_exact(std::ifstream& pak, char* buffer, std::size_t count, const Archi
 }
 
 // 目标位置是否可以写入。覆盖只允许替换普通文件，不会碰目录或符号链接。
-void check_target_available(const fs::path& target, bool overwrite) {
-    std::error_code ec;
-    const fs::file_status status = fs::symlink_status(target, ec);
-    if (status.type() == fs::file_type::not_found) {
-        return;
-    }
-    if (ec) {
-        throw Error(ErrorCode::io, "无法检查输出位置：" + path_text(target) + error_code_text(ec));
-    }
-    if (!overwrite) {
-        throw Error(ErrorCode::output_exists, "输出位置已存在，且未指定覆盖：" + path_text(target));
-    }
-    if (status.type() != fs::file_type::regular) {
-        throw Error(ErrorCode::output_exists, "输出位置已存在且不是普通文件，无法覆盖：" + path_text(target));
-    }
-}
+using detail::check_target_available;
 
 // 除非调用 release()，否则析构时关闭并删除没写完的输出文件，
 // 这样失败、取消或回调抛出异常都不会留下一个看起来完整的残缺文件。

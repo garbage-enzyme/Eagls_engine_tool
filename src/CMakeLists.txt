@@ -4,6 +4,9 @@ add_library(eagls_core STATIC
     archive/entry_name.cpp
     archive/index_cipher.cpp
     support/utf8.cpp
+    support/file_io.cpp
+    codec/content.cpp
+    operations/content_file.cpp
 )
 add_library(eagls::core ALIAS eagls_core)
 

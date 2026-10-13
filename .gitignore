@@ -373,3 +373,5 @@ FodyWeavers.xsd
 # 真实游戏样本和人工验证输出仅保存在本地
 /tests/fixtures/local/
 /tests/output/
+
+docs/eagls-archive.md
