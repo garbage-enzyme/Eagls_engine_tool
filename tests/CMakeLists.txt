@@ -8,6 +8,13 @@ target_link_libraries(eagls_content_tests PRIVATE eagls::core)
 eagls_configure_target(eagls_content_tests)
 add_test(NAME core.content_boundaries COMMAND eagls_content_tests)
 
+set(EAGLS_LOCAL_CONTENT_DIR "" CACHE PATH "显式选择已提取的本地内容样本目录，默认不读取游戏资源")
+if(EAGLS_LOCAL_CONTENT_DIR)
+    add_test(NAME core.content_local
+        COMMAND eagls_content_tests "${EAGLS_LOCAL_CONTENT_DIR}")
+endif()
+
+
 if(EAGLS_BUILD_CLI)
     foreach(case IN ITEMS no_args help short_help version unknown extra_args unimplemented)
         add_test(NAME cli.${case}

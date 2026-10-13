@@ -362,6 +362,9 @@ MigrationBackup/
 # Ionide (cross platform F# VS Code tools) working folder
 .ionide/
 
+CLAUDE.md
+ROLE.md
+
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 
@@ -375,3 +378,4 @@ FodyWeavers.xsd
 /tests/output/
 
 docs/eagls-archive.md
+docs/eagls-content.md
