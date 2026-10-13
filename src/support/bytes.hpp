@@ -16,6 +16,11 @@ inline std::uint32_t read_u32_le(const std::uint8_t* bytes) noexcept {
            (static_cast<std::uint32_t>(bytes[3]) << 24);
 }
 
+inline std::uint64_t read_u64_le(const std::uint8_t* bytes) noexcept {
+    return static_cast<std::uint64_t>(read_u32_le(bytes)) |
+           (static_cast<std::uint64_t>(read_u32_le(bytes + 4)) << 32);
+}
+
 inline std::int32_t read_i32_le(const std::uint8_t* bytes) noexcept {
     const auto value = read_u32_le(bytes);
     const auto signed_value = value <= 0x7FFFFFFFu ? static_cast<std::int64_t>(value)
@@ -25,6 +30,12 @@ inline std::int32_t read_i32_le(const std::uint8_t* bytes) noexcept {
 
 inline void write_u32_le(std::uint8_t* bytes, std::uint32_t value) noexcept {
     for (unsigned i = 0; i < 4; ++i) {
+        bytes[i] = static_cast<std::uint8_t>(value >> (i * 8));
+    }
+}
+
+inline void write_u64_le(std::uint8_t* bytes, std::uint64_t value) noexcept {
+    for (unsigned i = 0; i < 8; ++i) {
         bytes[i] = static_cast<std::uint8_t>(value >> (i * 8));
     }
 }

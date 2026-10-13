@@ -5,18 +5,24 @@
 //   这样「没有替换文件」时按物理顺序复制就与原 .pak 逐字节一致。
 // - 索引只重写受影响的偏移/长度字段：名称字段不重写、空槽位保持原样，
 //   末尾种子保持原值，重新加密后写出；没有替换时索引也逐字节一致。
+// - 偏移按归档自身记录布局的宽度写回（28 字节布局 32 位，40 字节布局 64 位），
+//   长度字段固定 32 位；记录里的其余字节（含 40 字节布局的保留区）不得改动。
+// - 「长度 0 终止」的布局（40 字节记录）下，拒绝把条目替换成空文件：
+//   引擎会在第一个长度为 0 的记录处停止扫描，其后的资源将不可访问。
 // - 未替换条目从原 .pak 分块复制，被替换文件同样分块读入，内存占用与文件大小无关。
 
 #include <eagls/archive.hpp>
 #include <eagls/error.hpp>
 
 #include "archive/index_cipher.hpp"
+#include "archive/index_record.hpp"
 #include "support/bytes.hpp"
 #include "support/file_io.hpp"
 
 #include <algorithm>
 #include <cstdint>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <system_error>
 #include <vector>
@@ -25,7 +31,6 @@ namespace eagls {
 namespace {
 
 namespace fs = std::filesystem;
-namespace format = archive_format;
 
 std::string path_text(const fs::path& path) {
     return path.u8string();
@@ -82,6 +87,7 @@ RepackResult repack_archive(const fs::path& index_path, const fs::path& pak_path
                     "回包只支持条目首尾相接、完全覆盖数据文件的归档；该归档存在前导、空洞、尾部或重叠，"
                     "重建无法保证与原文件一致。");
     }
+    const archive_format::IndexFormat& index_format = archive.index_format();
 
     // 二、输出位置检查：不允许覆盖输入，两个输出也不能指向同一路径。
     const fs::path inputs[] = {index_path, pak_path};
@@ -149,6 +155,11 @@ RepackResult repack_archive(const fs::path& index_path, const fs::path& pak_path
             throw Error(ErrorCode::resource_limit,
                         "替换文件超过 4 GiB，索引的长度字段无法表示：" + path_text(path));
         }
+        if (size == 0 && index_format.zero_length_terminates) {
+            throw Error(ErrorCode::invalid_content,
+                        "该布局下长度为 0 的记录是引擎的扫描终止标记，不能把条目替换成空文件，"
+                        "否则引擎会停止读取它和其后的资源：" + name);
+        }
         replaced[*found] = true;
         replacement_paths[*found] = path;
         new_sizes[*found] = static_cast<std::uint64_t>(size);
@@ -176,11 +187,18 @@ RepackResult repack_archive(const fs::path& index_path, const fs::path& pak_path
 
     std::vector<std::uint64_t> new_offsets(entry_count, 0);
     std::uint64_t cursor = 0;
+    // 新偏移必须能写进索引布局的偏移字段：28 字节布局是 32 位（引擎只读低 DWORD），
+    // 40 字节布局是 64 位。两种布局的长度字段都固定 32 位。
+    const std::uint64_t offset_limit = index_format.offset_width >= 8
+                                           ? std::numeric_limits<std::uint64_t>::max()
+                                           : static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max());
     for (const std::size_t index : order) {
         new_offsets[index] = cursor;
         cursor += new_sizes[index];
-        if (cursor > 0xFFFFFFFFu - format::pak_offset_base) {
-            throw Error(ErrorCode::resource_limit, "重建后的数据文件超过索引偏移字段能表示的上限。");
+        if (cursor > offset_limit - archive_format::pak_offset_base) {
+            throw Error(ErrorCode::resource_limit,
+                        "重建后的数据文件超过索引偏移字段能表示的上限（" +
+                            std::to_string(offset_limit - archive_format::pak_offset_base) + " 字节）。");
         }
     }
 
@@ -248,25 +266,26 @@ RepackResult repack_archive(const fs::path& index_path, const fs::path& pak_path
     std::size_t replaced_count = 0;
     for (std::size_t i = 0; i < entry_count; ++i) {
         const ArchiveEntry& entry = archive.entries()[i];
-        std::uint8_t* slot = table.data() + i * format::slot_size;
+        // 用原始槽号定位记录：解析出的条目在表内不一定与紧凑序号一致（空槽位会被跳过）。
+        std::uint8_t* slot = table.data() + entry.slot * index_format.record_size;
         if (replaced[i]) {
             ++replaced_count;
-            // 长度字段必须与新内容一致（包括替换成空文件的情况）。
+            // 长度字段必须与新内容一致（40 字节布局下替换成空文件已在前面拒绝）。
             if (new_sizes[i] != entry.size) {
-                detail::write_u32_le(slot + format::name_field_size + 4,
-                                     static_cast<std::uint32_t>(new_sizes[i]));
+                detail::write_u32_le(slot + index_format.size_position, static_cast<std::uint32_t>(new_sizes[i]));
             }
         }
         if (new_sizes[i] > 0) {
-            const auto index_offset = static_cast<std::uint32_t>(new_offsets[i] + format::pak_offset_base);
+            const std::uint64_t index_offset = new_offsets[i] + archive_format::pak_offset_base;
             if (index_offset != entry.index_offset) {
-                detail::write_u32_le(slot + format::name_field_size, index_offset);
+                detail::write_index_offset(slot, index_format, index_offset);
             }
         }
     }
-    detail::apply_index_cipher(table.data(), format::table_size, archive.seed());
-    table.resize(format::index_file_size);
-    detail::write_u32_le(table.data() + format::table_size, archive.seed());
+    // 此时 table 只含槽位表（不含种子）；加密后追加末尾的明文种子。
+    detail::apply_index_cipher(table.data(), table.size(), archive.seed());
+    table.resize(index_format.index_file_size());
+    detail::write_u32_le(table.data() + index_format.table_size(), archive.seed());
 
     // .idx 写入失败会自动删除自己的残片；此时 .pak 的 guard 仍未释放，同样会被清理。
     detail::write_binary_file(out_index_path, table, overwrite);

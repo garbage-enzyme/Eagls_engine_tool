@@ -4,6 +4,7 @@
 
 #include "archive/entry_name.hpp"
 #include "archive/index_cipher.hpp"
+#include "archive/index_record.hpp"
 #include "support/utf8.hpp"
 #include "support/bytes.hpp"
 #include "support/file_io.hpp"
@@ -53,20 +54,39 @@ using detail::read_u32_le;
 // 确认路径指向存在的普通文件并返回大小，这样才能给出明确的中文原因。
 using detail::regular_file_size;
 
+// 已登记的索引记录布局：识别时要求索引大小与某一布局的完整大小（槽位表加种子）精确
+// 相等。只接受有真实样本与引擎证据的布局，不做「能整除就接受」的猜测；未来取得新
+// 证据后在这里登记。
+constexpr archive_format::IndexFormat known_index_formats[] = {archive_format::index_28,
+                                                              archive_format::index_40};
+
+// 已知布局中最小的完整索引大小；比它还小的文件不可能是索引。
+constexpr std::size_t min_known_index_file_size = archive_format::index_28.index_file_size();
+static_assert(archive_format::index_28.index_file_size() <= archive_format::index_40.index_file_size(),
+              "最小索引大小假定 28 字节布局最小；新增布局时需复核这个假定");
+
+// 索引读取上限：已知布局最大约 400 KB，这里给一个远高于它的护栏，
+// 避免把明显不是索引的超大文件整个读进内存。
+constexpr std::uint64_t max_index_file_size = 16 * 1024 * 1024;
+
 std::vector<std::uint8_t> read_index_file(const fs::path& path) {
     const std::uint64_t size = regular_file_size(path, "索引文件");
-    if (size != format::index_file_size) {
+    if (size < min_known_index_file_size) {
         throw Error(ErrorCode::invalid_index,
-                    "索引文件大小应为 " + std::to_string(format::index_file_size) +
-                        " 字节（10000 个 28 字节槽位加 4 字节种子），实际为 " + std::to_string(size) +
-                        " 字节；它可能属于尚未验证的其他格式变体：" + path_text(path));
+                    "索引文件只有 " + std::to_string(size) + " 字节，小于最小已知布局的 " +
+                        std::to_string(min_known_index_file_size) + " 字节；它可能不是索引文件：" +
+                        path_text(path));
+    }
+    if (size > max_index_file_size) {
+        throw Error(ErrorCode::invalid_index,
+                    "索引文件为 " + std::to_string(size) + " 字节，超出已知索引布局的范围：" + path_text(path));
     }
 
     std::ifstream input(path, std::ios::binary);
     if (!input) {
         throw Error(ErrorCode::io, "无法打开索引文件：" + path_text(path));
     }
-    std::vector<std::uint8_t> bytes(format::index_file_size);
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
     input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     if (input.gcount() != static_cast<std::streamsize>(bytes.size())) {
         throw Error(ErrorCode::io, "读取索引文件失败：" + path_text(path));
@@ -75,24 +95,48 @@ std::vector<std::uint8_t> read_index_file(const fs::path& path) {
 }
 
 // 解析已解密的槽位表。遇到第一个非法槽位就抛出，不尝试跳过或猜测。
-std::vector<ArchiveEntry> parse_table(const std::uint8_t* table, std::uint64_t pak_size) {
+std::vector<ArchiveEntry> parse_table(const std::uint8_t* table, std::size_t table_size, std::uint64_t pak_size,
+                                      const archive_format::IndexFormat& format) {
+    // 调用方已按布局的完整大小精确匹配过索引文件，这里再确认一次，避免越界读取。
+    if (table_size != format.table_size()) {
+        throw Error(ErrorCode::invalid_index,
+                    "内部错误：解密后的槽位表大小 " + std::to_string(table_size) + " 与布局要求的 " +
+                        std::to_string(format.table_size()) + " 不一致。");
+    }
+
     std::vector<ArchiveEntry> entries;
-    for (std::size_t slot = 0; slot < format::slot_count; ++slot) {
-        const std::uint8_t* record = table + slot * format::slot_size;
+    for (std::size_t slot = 0; slot < format.slot_count; ++slot) {
+        const std::uint8_t* record = table + slot * format.record_size;
+        const std::uint32_t size = read_u32_le(record + format.size_position);
+
+        // 「长度 0 终止」的布局（40 字节记录）下，引擎在第一个长度字段为 0 的记录处
+        // 停止扫描——空槽也一样——其后的槽位游戏不可访问。这里同样停止，不把工具
+        // 能读出但游戏读不到的槽位当成条目（引擎依据：SAIMIN.exe 0x41DD90 cmp [rec+20h],0）。
+        if (format.zero_length_terminates && size == 0) {
+            break;
+        }
+
         if (record[0] == 0) {
             continue;  // 首字节为 0 即空槽位
         }
 
         std::size_t name_length = 0;
-        while (name_length < format::name_field_size && record[name_length] != 0) {
+        while (name_length < format.name_size && record[name_length] != 0) {
             ++name_length;
+        }
+
+        const std::string slot_text = "槽位 " + std::to_string(slot);
+        if (format.name_requires_nul && name_length == format.name_size) {
+            throw Error(ErrorCode::invalid_entry,
+                        slot_text + " 的文件名区（" + std::to_string(format.name_size) +
+                            " 字节）内没有 NUL 终止符；该布局要求名称以 NUL 结尾（原始字节 " +
+                            hex_text(record, format.name_size) + "）");
         }
 
         ArchiveEntry entry;
         entry.slot = slot;
         entry.name.assign(reinterpret_cast<const char*>(record), name_length);
 
-        const std::string slot_text = "槽位 " + std::to_string(slot);
         if (!detail::is_valid_utf8(entry.name)) {
             throw Error(ErrorCode::invalid_entry,
                         slot_text + " 的文件名不是合法的 UTF-8（原始字节 " + hex_text(record, name_length) +
@@ -106,24 +150,68 @@ std::vector<ArchiveEntry> parse_table(const std::uint8_t* table, std::uint64_t p
             }
         }
 
-        entry.index_offset = read_u32_le(record + format::name_field_size);
-        entry.size = read_u32_le(record + format::name_field_size + 4);
+        entry.index_offset = detail::read_index_offset(record, format);
+        entry.size = size;
         if (entry.index_offset < format::pak_offset_base) {
             throw Error(ErrorCode::entry_out_of_range,
                         slot_text + "（" + entry.name + "）的偏移 " + std::to_string(entry.index_offset) +
                             " 小于数据基数 " + std::to_string(format::pak_offset_base));
         }
-        entry.pak_offset = static_cast<std::uint64_t>(entry.index_offset) - format::pak_offset_base;
+        entry.pak_offset = entry.index_offset - format::pak_offset_base;
 
-        const std::uint64_t end = entry.pak_offset + entry.size;
-        if (end > pak_size) {
+        // 用减法形式做范围检查，避免加法溢出；错误消息分列起点与长度，同样不做加法。
+        if (entry.pak_offset > pak_size || entry.size > pak_size - entry.pak_offset) {
             throw Error(ErrorCode::entry_out_of_range,
-                        slot_text + "（" + entry.name + "）的数据范围 [" + std::to_string(entry.pak_offset) + ", " +
-                            std::to_string(end) + ") 超出数据文件（共 " + std::to_string(pak_size) + " 字节）");
+                        slot_text + "（" + entry.name + "）的数据范围起点 " + std::to_string(entry.pak_offset) +
+                            "、长度 " + std::to_string(entry.size) + " 超出数据文件（共 " +
+                            std::to_string(pak_size) + " 字节）");
         }
         entries.push_back(std::move(entry));
     }
     return entries;
+}
+
+// 识别到的索引内容：布局、种子、解密后的槽位表与条目。
+struct ParsedIndex {
+    const archive_format::IndexFormat* format = nullptr;
+    std::uint32_t seed = 0;
+    std::vector<std::uint8_t> table;
+    std::vector<ArchiveEntry> entries;
+};
+
+// 按精确大小匹配识别索引布局，再解密并解析。只接受已登记的布局；
+// 大小不匹配时给出实际大小与全部已知布局的明确错误。
+ParsedIndex parse_index(const std::vector<std::uint8_t>& index, std::uint64_t pak_size, const fs::path& path) {
+    const archive_format::IndexFormat* matched = nullptr;
+    for (const archive_format::IndexFormat& candidate : known_index_formats) {
+        if (index.size() != candidate.index_file_size()) {
+            continue;
+        }
+        if (matched != nullptr) {
+            throw Error(ErrorCode::invalid_index,
+                        "索引文件大小同时匹配多个已知布局，无法唯一确定：" + path_text(path));
+        }
+        matched = &candidate;
+    }
+    if (matched == nullptr) {
+        std::string known;
+        for (const archive_format::IndexFormat& candidate : known_index_formats) {
+            known += "\n  " + std::to_string(candidate.index_file_size()) + " 字节（" +
+                     std::to_string(candidate.slot_count) + " 个 " + std::to_string(candidate.record_size) +
+                     " 字节槽位加 4 字节种子）";
+        }
+        throw Error(ErrorCode::invalid_index,
+                    "索引文件大小为 " + std::to_string(index.size()) + " 字节，与任何已知记录布局都不匹配：" +
+                        known + "\n文件：" + path_text(path));
+    }
+
+    ParsedIndex parsed;
+    parsed.format = matched;
+    parsed.seed = read_u32_le(index.data() + matched->table_size());
+    parsed.table.assign(index.begin(), index.end() - static_cast<std::ptrdiff_t>(format::seed_size));
+    detail::apply_index_cipher(parsed.table.data(), parsed.table.size(), parsed.seed);
+    parsed.entries = parse_table(parsed.table.data(), parsed.table.size(), pak_size, *matched);
+    return parsed;
 }
 
 // 提取按名称定位条目，重名会让结果含糊，因此不接受。
@@ -230,18 +318,19 @@ private:
 }  // namespace
 
 Archive Archive::open(const fs::path& index_path, const fs::path& pak_path) {
-    std::vector<std::uint8_t> index = read_index_file(index_path);
+    const std::vector<std::uint8_t> index = read_index_file(index_path);
     const std::uint64_t pak_size = regular_file_size(pak_path, "数据文件");
+
+    ParsedIndex parsed = parse_index(index, pak_size, index_path);
 
     Archive archive;
     archive.pak_path_ = pak_path;
     archive.pak_size_ = pak_size;
-    archive.seed_ = read_u32_le(index.data() + format::table_size);
-
-    detail::apply_index_cipher(index.data(), format::table_size, archive.seed_);
-    archive.entries_ = parse_table(index.data(), pak_size);
+    archive.format_ = *parsed.format;
+    archive.seed_ = parsed.seed;
     // 保留解密后的槽位表作为回包模板；不含末尾 4 字节明文种子。
-    archive.table_.assign(index.begin(), index.end() - static_cast<std::ptrdiff_t>(format::seed_size));
+    archive.table_ = std::move(parsed.table);
+    archive.entries_ = std::move(parsed.entries);
     reject_duplicate_names(archive.entries_);
     archive.layout_ = compute_layout(archive.entries_, pak_size);
     return archive;

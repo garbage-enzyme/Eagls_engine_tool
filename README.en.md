@@ -28,7 +28,7 @@ The project starts from one principle: **every conclusion is validated against r
 
 | Module     | Command                               | Capability                                                               |
 | ---------- | ------------------------------------- | ------------------------------------------------------------------------ |
-| Archives   | `pak info`, `pak list`, `pak extract` | Inspect IDX/PAK archives, list entries, extract by index verbatim         |
+| Archives   | `pak info`, `pak list`, `pak extract` | Inspect IDX/PAK archives (28/40-byte record layouts), list entries, extract by index verbatim |
 | Repacking  | `pak repack`                          | Replace entries with files from a directory, rebuild IDX/PAK              |
 | Scripts    | `dat decrypt`, `dat text`             | Decrypt DAT; export the text body preserving its original encoding       |
 | Images     | `gr decode`, `gr encode`              | Convert between GR and 24/32-bit BMP                                     |
@@ -40,10 +40,10 @@ The project starts from one principle: **every conclusion is validated against r
 
 All results below come from real samples. "Independent implementation" means a separate checker written without calling any code from this project.
 
-- **Archives**: SCPACK (279), CGPACK (1,181) and WAVEPACK (3,562) were fully extracted — 5,022 entries in total — and every entry matched an independent implementation by SHA-256.
+- **Archives**: SCPACK (279), CGPACK (1,181) and WAVEPACK (3,562) were fully extracted — 5,022 entries in total — and every entry matched an independent implementation by SHA-256; a second sample, SAIMIN (40-byte index record layout), matched the same way — all 140 SCPACK entries compared in full, plus 3 sampled entries each from CGPACK and WAVEPACK (all 10,768 entries of that sample are registered by the independent implementation).
 - **Scripts and images**: 279 DAT and 1,181 GR files, 1,739 outputs in total, are byte-identical to the independent implementation; GR encoding was verified by round-trips on real samples and synthetic BMPs (decode → encode → decode, byte-identical).
 - **Text**: the full table covers 187 DAT files, 17,414 text entries and 71 speakers; reinserting an unmodified table reproduces the original file byte-for-byte; the 10 GBK translations in `a001.dat` were verified in-game.
-- **Repacking**: with no replacement or an identical replacement, the rebuilt idx/pak is byte-identical to the original; after replacing content the archive can be reopened and extracted again.
+- **Repacking**: with no replacement or an identical replacement, the rebuilt idx/pak is byte-identical to the original (regressions cover both the 28- and 40-byte record layouts); after replacing content the archive can be reopened and extracted again. Under the 40-byte record layout, replacing an entry with an empty file is rejected (a zero length would be taken as the engine's scan terminator).
 - **Executable**: the 6-byte base GBK patch is verified in-game, and its output is byte-identical to the independent implementation.
 
 ### Known limitations
@@ -163,10 +163,10 @@ eagls pak extract <idx> <pak> [--out DIR] [--entry NAME]... [--overwrite]
 eagls pak repack  <idx> <pak> --from DIR [--out DIR] [--overwrite]
 ```
 
-- `info`: show archive information (seed, entry count, data size, layout).
+- `info`: show archive information (index record layout, seed, entry count, data size, entry coverage).
 - `list`: list every entry (slot, name, physical offset, size).
 - `extract`: extract by index verbatim, without any decryption or conversion. Outputs to `<pak directory>/<pak stem>_out` by default; `--entry` may be repeated, a name may carry a directory prefix, and only the part after the last separator is compared.
-- `repack`: replace same-named entries with the files in the `--from` directory and rebuild the archive. Every regular file in the directory must match exactly one entry (ASCII case-insensitive), otherwise it fails. Outputs to `<pak directory>/<pak stem>_repack` by default.
+- `repack`: replace same-named entries with the files in the `--from` directory and rebuild the archive. Every regular file in the directory must match exactly one entry (ASCII case-insensitive), otherwise it fails. Outputs to `<pak directory>/<pak stem>_repack` by default. If the archive's layout treats a zero length as the engine's scan terminator (the 40-byte record layout), replacing an entry with an empty file is explicitly rejected.
 
 ### Scripts and images (dat, gr)
 

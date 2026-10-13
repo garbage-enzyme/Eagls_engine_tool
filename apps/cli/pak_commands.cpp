@@ -196,8 +196,12 @@ int run_repack(const std::vector<std::string>& args) {
 }
 
 void print_info(const eagls::Archive& archive, const fs::path& idx_path, const fs::path& pak_path) {
+    const eagls::archive_format::IndexFormat& index_format = archive.index_format();
     std::cout << "索引文件：" << idx_path.u8string() << '\n'
               << "数据文件：" << pak_path.u8string() << '\n'
+              << "索引布局：" << index_format.record_size << " 字节记录（名称区 " << index_format.name_size
+              << " 字节，偏移字段 " << index_format.offset_width * 8 << " 位，长度字段 32 位），共 "
+              << index_format.slot_count << " 个槽位\n"
               << "种子：0x" << hex8(archive.seed()) << '\n'
               << "条目数：" << archive.entries().size() << '\n'
               << "数据大小：" << archive.pak_size() << " 字节\n";

@@ -12,32 +12,60 @@
 namespace eagls {
 
 // EAGLS 的 IDX/PAK 归档由一个索引文件（.idx）和一个数据文件（.pak）组成。
-//，
-// 证据与验证方法见 docs/eagls-archive.md。其他游戏或其他引擎版本是否沿用
-// 同一格式尚未验证，遇到不符的文件时会明确报错，而不是猜测另一种布局。
+// 索引是等宽记录的槽位表，记录里保存条目名、数据偏移与长度；目前验证过 28 与
+// 40 字节两种记录布局（见 archive_format::IndexFormat），证据与验证方法见
+// docs/eagls-archive.md。遇到未登记的布局时会明确报错，而不是猜测解析方式。
 namespace archive_format {
-
-// 索引表固定有 10000 个槽位；未使用的槽位首字节为 0。
-inline constexpr std::size_t slot_count = 10000;
-
-// 每个槽位 28 字节：20 字节文件名 + u32 偏移 + u32 长度（整数均为小端）。
-inline constexpr std::size_t slot_size = 28;
-
-// 文件名字段宽度。名称不足 20 字节时以 NUL 补齐；恰好 20 字节时没有结束符。
-inline constexpr std::size_t name_field_size = 20;
-
-// 槽位表总字节数（10000 * 28）。
-inline constexpr std::size_t table_size = slot_count * slot_size;
 
 // 索引文件末尾 4 字节是明文的小端 u32 种子，用于解密前面的槽位表，本身不参与解密。
 inline constexpr std::size_t seed_size = 4;
 
-// 索引文件的总字节数，也是唯一接受的索引文件大小。
-inline constexpr std::size_t index_file_size = table_size + seed_size;
-
 // 槽位里记录的偏移 = 条目在 .pak 文件内的物理位置 + 此基数。
 // 即真实数据从 .pak 的第 0 字节开始，而槽位里记录的首个偏移是 5963（0x174B）。
 inline constexpr std::uint32_t pak_offset_base = 5963;
+
+// 索引记录的磁盘布局描述。
+//
+// 不同 EAGLS 版本的索引记录宽度不同（目前见到 28 与 40 字节两种），差异集中在这里；
+// 解析、提取与回包都按布局描述读写，不再依赖单一的固定常量。
+//
+// 只登记已经取得真实样本与引擎证据的布局：两者的槽位数都是 10000，因为引擎按固定
+// 字节数读取整个索引表，而不是从文件大小推断；其余槽位数尚无可信证据。
+struct IndexFormat {
+    // 记录步长（字节）。
+    std::size_t record_size = 0;
+
+    // 名称字段宽度（字节）。
+    std::size_t name_size = 0;
+
+    // 偏移字段在记录内的位置与宽度（4 或 8 字节，小端）。
+    std::size_t offset_position = 0;
+    std::size_t offset_width = 0;
+
+    // 长度字段在记录内的位置（固定 4 字节小端）。
+    std::size_t size_position = 0;
+
+    // 引擎固定读取的槽位数。
+    std::size_t slot_count = 0;
+
+    // 名称必须在该宽度内以 NUL 终止（不允许恰好占满字段）。
+    bool name_requires_nul = false;
+
+    // 长度为 0 的已用记录是终止标记：引擎在此停止读取，其后的槽位不会被游戏访问。
+    bool zero_length_terminates = false;
+
+    // 槽位表总字节数。
+    [[nodiscard]] constexpr std::size_t table_size() const noexcept { return record_size * slot_count; }
+
+    // 索引文件总字节数（槽位表加末尾 4 字节种子）。
+    [[nodiscard]] constexpr std::size_t index_file_size() const noexcept { return table_size() + seed_size; }
+};
+
+// 28 字节记录：20 字节名称 + u32 偏移 + u32 长度（炎孕人生样本，10000 槽）。
+inline constexpr IndexFormat index_28{28, 20, 20, 4, 24, 10000, false, false};
+
+// 40 字节记录：24 字节名称 + 64 位偏移 + u32 长度 + 4 字节保留区（SAIMIN 样本，10000 槽）。
+inline constexpr IndexFormat index_40{40, 24, 24, 8, 32, 10000, true, true};
 
 }  // namespace archive_format
 
@@ -46,12 +74,13 @@ struct ArchiveEntry {
     // 在索引表中的槽位序号，范围 0..9999。
     std::size_t slot = 0;
 
-    // 条目名。取自 20 字节名称字段的首个 NUL 之前（或全部 20 字节），
+    // 条目名。取自名称字段首个 NUL 之前（40 字节布局必须带 NUL；
+    // 28 字节布局允许恰好占满 20 字节、没有终止符）。
     // 已验证为合法 UTF-8 且不含控制字符，因此原始字节与展示文本一致。
     std::string name;
 
-    // 索引里记录的偏移，包含 pak_offset_base。
-    std::uint32_t index_offset = 0;
+    // 索引里记录的偏移，包含 pak_offset_base。28 字节布局为 u32，40 字节布局为 u64。
+    std::uint64_t index_offset = 0;
 
     // 条目数据的字节数。
     std::uint32_t size = 0;
@@ -134,7 +163,8 @@ struct RepackResult {
 
 // 一个已打开的 IDX/PAK 归档。
 //
-// 打开时读取并解密整个索引（约 280 KB），校验每个条目，但不读取 .pak 内容。
+// 打开时读取并解密整个索引表（28 字节布局约 280 KB，40 字节布局约 400 KB），
+// 校验每个条目，但不读取 .pak 内容。
 // 对象不持有文件句柄，每次读取数据都会重新打开 .pak，因此可以复制，
 // 多个线程可以同时调用 const 成员函数。
 //
@@ -143,9 +173,10 @@ class Archive {
 public:
     // 打开归档。index_path 为 .idx，pak_path 为 .pak，两者通常同名同目录。
     //
-    // 校验内容：索引大小必须为 280004 字节；每个已使用槽位的文件名必须是合法 UTF-8
-    // 且无控制字符；偏移不得小于基数；条目不得越过 .pak 末尾；不允许（忽略 ASCII
-    // 大小写后）重名。不检查条目之间是否连续，该信息见 layout()。
+    // 校验内容：索引大小必须匹配一个已登记的记录布局（见 archive_format 的
+    // IndexFormat）；每个已使用槽位的文件名必须是合法 UTF-8 且无控制字符；
+    // 偏移不得小于基数；条目不得越过 .pak 末尾；不允许（忽略 ASCII 大小写后）重名。
+    // 不检查条目之间是否连续，该信息见 layout()。
     [[nodiscard]] static Archive open(const std::filesystem::path& index_path,
                                       const std::filesystem::path& pak_path);
 
@@ -160,7 +191,10 @@ public:
 
     [[nodiscard]] const ArchiveLayout& layout() const noexcept { return layout_; }
 
-    // 打开时解密出的槽位表（table_size 字节，不含末尾 4 字节明文种子）。
+    // 打开的归档使用的索引记录布局（见 archive_format::IndexFormat）。
+    [[nodiscard]] const archive_format::IndexFormat& index_format() const noexcept { return format_; }
+
+    // 打开时解密出的槽位表（index_format().table_size() 字节，不含末尾 4 字节明文种子）。
     // 回包以它为模板，未触及的原始字节（例如名称字段）保持原样。
     [[nodiscard]] const std::vector<std::uint8_t>& decrypted_table() const noexcept { return table_; }
 
@@ -198,6 +232,7 @@ private:
     std::uint32_t seed_ = 0;
     std::uint64_t pak_size_ = 0;
     ArchiveLayout layout_;
+    archive_format::IndexFormat format_{};  // 打开时识别出的记录布局
 };
 
 // 用替换目录重建归档：目录中的文件名（忽略 ASCII 大小写）与条目一一对应，
