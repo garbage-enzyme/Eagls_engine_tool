@@ -39,7 +39,7 @@
 
 - GR 编解码往返：`a00.gr`、`FBLACK.gr`、`blackt.gr` 解码后重新编码（LZSS 与全字面量两条路径）再解码，与原 BMP 逐字节一致；`blackt.gr` 覆盖压缩流不足 5963 字节的补零路径。
 - PAK 回包三场景：空替换目录与原样替换单条目时，重建的 `.idx`/`.pak` 与原文件逐字节一致；改内容替换后重新打开归档，替换条目与输入文件一致、未替换条目保持不变。
-- EAGLS.exe 补丁：`cli.contract.exe_local` 对真实样本补丁产物的 SHA-256 做固定断言。
+- 可执行文件补丁：`cli.contract.exe_local` 对 EAGLS.exe 与 SAIMIN.exe 两个真实样本的补丁产物 SHA-256 做固定断言，并覆盖版本自动识别与拒绝路径。
 
 ### 中文排版补丁回归（2026-10-13）
 
@@ -48,3 +48,14 @@
 - `cli.contract.exe_local` 保留旧 6 字节 SHA-256 断言，新增 `--typography zh-cn` 直出/升级/状态检查；新产物 SHA-256 为 `dad2d5dba3452b0e3dff1b269953adc4084575d45dab66422753ed30cf75e829`。
 - 独立 `build/verify_typography.py` 不导入 C++ 代码，使用 GBK 编码和独立指令构造交叉验证：新产物与 C++ 逐字节一致，26 个修改区域、454 个变化字节、文件大小不变。
 - 新模式指定 `SimHei`/`SimSun`，迁移 16 个行首禁则字符及 7 个标点的字距分类。**游戏内视觉效果待验收**；保留原紧缩系数和单次悬挂，不包含行尾禁则或连续标点成组算法。
+
+### SAIMIN.exe 中文补丁（2026-10-14）
+
+- 样本：`tests/fixtures/local/OLE-M/SAIMIN/SAIMIN.exe`（757760 字节，SHA-256 `d4205c69f095b279e1bd9735bdf1977882cd51267561e7960b1204b8299f0d0`）。
+- 5 处字节：双字节判定 `0x1879`（A0→FE）与字体字符集 `0x7283` / `0x81E6` / `0xD9A3` / `0xDC49`（80→86）；
+  EAGLS 版判定特征在 SAIMIN 中 0 命中属预期行为，定位改为按版本特征自动识别。
+- `core.exe_patch` 合成回归覆盖：SAIMIN 特征命中、长位移 32 位栈偏移读取、集合外写入忽略、
+  重复栈偏移/缺失/特征重复拒绝、跨版本歧义拒绝、中文排版拒绝。
+- `cli.contract.exe_local` 固定补丁产物 SHA-256：`9ecd125f…0968042b2b52`；MinGW 与 MSVC 产物逐字节一致。
+- 游戏内验收须先把注册表 `HKLM\Software\WOW6432Node\OLE-M\SAIMIN` 的 `InstFolder`
+  指向补丁副本目录再启动；尚待执行。

@@ -72,6 +72,10 @@ std::string hex_bytes(const std::vector<std::uint8_t>& bytes) {
     return text;
 }
 
+void print_profile(eagls::ExePatchProfile profile) {
+    std::cout << "识别版本：" << eagls::exe_patch_profile_name(profile) << '\n';
+}
+
 void print_sites(const eagls::ExePatchReport& report) {
     for (const auto& site : report.sites) {
         std::cout << "  VA " << hex_va(site.instruction_va) << "  " << kind_text(site.kind)
@@ -86,12 +90,12 @@ void print_sites(const eagls::ExePatchReport& report) {
 
 void usage() {
     std::cout
-        << "用法：eagls exe check <EAGLS.exe> [--typography zh-cn]\n"
-        << "      eagls exe patch <EAGLS.exe> [--out FILE] [--overwrite] [--typography zh-cn]\n\n"
-        << "exe check：定位所选补丁位置并报告当前状态，不写文件。\n"
+        << "用法：eagls exe check <EAGLS.exe|SAIMIN.exe> [--typography zh-cn]\n"
+        << "      eagls exe patch <EAGLS.exe|SAIMIN.exe> [--out FILE] [--overwrite] [--typography zh-cn]\n\n"
+        << "exe check：自动识别 EAGLS / SAIMIN 版本，定位所选补丁位置并报告当前状态，不写文件。\n"
         << "exe patch：写出补丁副本；默认 <主文件名>-cn.exe，拒绝覆盖输入文件本身。\n"
-        << "默认仍是已游戏内验证的 6 字节 GBK 补丁，配合 text apply --encoding gbk。\n"
-        << "--typography zh-cn：另换用 SimHei/SimSun、中文行首禁则及标点字距分类；\n"
+        << "默认是已游戏内验证的 GBK 补丁（EAGLS 6 处 / SAIMIN 5 处），配合 text apply --encoding gbk。\n"
+        << "--typography zh-cn：另换用 SimHei/SimSun、中文行首禁则及标点字距分类；仅 EAGLS 版可用。\n"
         << "可升级旧 GBK 补丁，仅支持已识别的游戏版本。沿用原紧缩系数与单次悬挂；\n"
         << "不含行尾禁则或连续标点成组处理，新增排版效果仍需游戏内验收。\n";
 }
@@ -137,6 +141,7 @@ int dispatch(const std::vector<std::string>& args) {
     if (check) {
         if (out || overwrite) return invalid();
         const auto report = eagls::inspect_exe_file(*input, profile);
+        print_profile(report.profile);
         print_sites(report);
         std::cout << "补丁位置共 " << report.sites.size() << " 处；状态：" << state_text(report.state)
                   << "。\n";
@@ -154,6 +159,7 @@ int dispatch(const std::vector<std::string>& args) {
         target = input->parent_path() / fs::u8path(stem + "-cn" + extension);
     }
     const auto report = eagls::patch_exe_file(*input, target, overwrite, profile);
+    print_profile(report.profile);
     std::cout << "已按 " << report.sites.size() << " 个位置写出补丁副本：\n";
     print_sites(report);
     std::cout << "已写出：" << target.u8string() << '\n';

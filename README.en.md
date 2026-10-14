@@ -33,7 +33,7 @@ The project starts from one principle: **every conclusion is validated against r
 | Scripts    | `dat decrypt`, `dat text`             | Decrypt DAT; export the text body preserving its original encoding       |
 | Images     | `gr decode`, `gr encode`              | Convert between GR and 24/32-bit BMP                                     |
 | Text       | `text extract`, `text apply`          | Extract a JSON text table; reinsert translations and rebuild DAT, with GBK support |
-| Executable | `exe check`, `exe patch`              | Apply the GBK Simplified Chinese display patch to EAGLS.exe, with optional Chinese typography |
+| Executable | `exe check`, `exe patch`              | Apply the GBK Simplified Chinese display patch to EAGLS.exe / SAIMIN.exe, with optional Chinese typography (EAGLS only) |
 | GUI        | —                                     | Not integrated yet                                                       |
 
 ### Verification
@@ -44,7 +44,7 @@ All results below come from real samples. "Independent implementation" means a s
 - **Scripts and images**: 279 DAT and 1,181 GR files, 1,739 outputs in total, are byte-identical to the independent implementation; GR encoding was verified by round-trips on real samples and synthetic BMPs (decode → encode → decode, byte-identical).
 - **Text**: the full table covers 187 DAT files, 17,414 text entries and 71 speakers; reinserting an unmodified table reproduces the original file byte-for-byte; the 10 GBK translations in `a001.dat` were verified in-game.
 - **Repacking**: with no replacement or an identical replacement, the rebuilt idx/pak is byte-identical to the original (regressions cover both the 28- and 40-byte record layouts); after replacing content the archive can be reopened and extracted again. Under the 40-byte record layout, replacing an entry with an empty file is rejected (a zero length would be taken as the engine's scan terminator).
-- **Executable**: the 6-byte base GBK patch is verified in-game, and its output is byte-identical to the independent implementation.
+- **Executable**: the EAGLS 6-byte base GBK patch is verified in-game and byte-identical to the independent implementation; the SAIMIN 5-byte patch has passed byte-level localization (real sample + synthetic regressions) and cross-compiler output consistency checks, and is **awaiting in-game verification**.
 
 ### Known limitations
 
@@ -195,14 +195,14 @@ eagls text apply   <file-or-directory> --table FILE.json --out DIR [--overwrite]
 ### Executable (exe)
 
 ```text
-eagls exe check <EAGLS.exe> [--typography zh-cn]
-eagls exe patch <EAGLS.exe> [--out FILE] [--overwrite] [--typography zh-cn]
+eagls exe check <EAGLS.exe|SAIMIN.exe> [--typography zh-cn]
+eagls exe patch <EAGLS.exe|SAIMIN.exe> [--out FILE] [--overwrite] [--typography zh-cn]
 ```
 
-- `check`: locate the selected patch by signature and report its current state without writing files. Only the base GBK patch is checked by default.
+- `check`: **auto-detect the EAGLS / SAIMIN build** by signature and report the state of the selected patch without writing files. Only the base GBK patch is checked by default.
 - `patch`: write a patched copy, named `<stem>-cn.exe` by default, and refuse to overwrite the input file itself. The patch relies on signature matching; an unrecognized executable produces a clear error and no bytes are written.
-- By default only the in-game-verified 6-byte GBK patch is applied, to be used with `text apply --encoding gbk`.
-- `--typography zh-cn` (optional): additionally switches the font names to `SimHei` / `SimSun` and ports Chinese line-start kinsoku and punctuation letter-spacing classes, supporting upgrades from a recognized older GBK patch. This mode keeps the original letter-spacing coefficients and single hanging punctuation, **does not handle full consecutive-punctuation or end-of-line kinsoku processing, and its in-game visual result is still to be verified**.
+- By default the in-game-verified GBK patch is applied (6 sites for EAGLS, 5 for SAIMIN), to be used with `text apply --encoding gbk`; the SAIMIN patch is **awaiting in-game verification**.
+- `--typography zh-cn` (optional, EAGLS only): additionally switches the font names to `SimHei` / `SimSun` and ports Chinese line-start kinsoku and punctuation letter-spacing classes, supporting upgrades from a recognized older GBK patch. This mode keeps the original letter-spacing coefficients and single hanging punctuation, **does not handle full consecutive-punctuation or end-of-line kinsoku processing, and its in-game visual result is still to be verified**.
 
 ## Project structure
 

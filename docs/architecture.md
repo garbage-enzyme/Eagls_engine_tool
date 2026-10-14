@@ -43,7 +43,7 @@ flowchart TD
 目前使用的库内目录：
 
 - `src/archive/`：IDX/PAK 解析、容器模型与回包重建。
-- `src/codec/`：DAT 解密与结构校验、GR 编码与解码（前缀加解密、LZSS、BMP 校验与规范化）、PE32 解析与 EAGLS.exe 中文补丁定位。
+- `src/codec/`：DAT 解密与结构校验、GR 编码与解码（前缀加解密、LZSS、BMP 校验与规范化）、PE32 解析与 EAGLS.exe / SAIMIN.exe 中文补丁定位（按特征码自动识别编译版本）。
   `exe_patch.cpp` 处理基础补丁和等长字节块状态；`exe_typography.cpp` 处理可选中文排版，私有 `exe_typography_profile.hpp` 保存已核对的原版指令窗口。只重写原比较块和字体槽位，不扩充 PE 或引入 Hook。
 - `src/operations/`：`convert_content_file`、文本清单编排与 exe 补丁文件操作，供 CLI/未来 GUI 共用。
 - `src/support/`：共享小端读写、MSVC 随机数、UTF-8 与文件读写/目标检查。
@@ -85,7 +85,7 @@ flowchart TD
 | 写回能力 | 回包与必要的文本回填 | 回包已实现：无替换/原样替换时重建产物与原文件逐字节一致，改内容替换可重新提取；游戏内加载验收待做 |
 | GUI 接入 | FLTK 调用已验证公共操作 | 交互不阻塞，复用 CLI 已验证的核心行为 |
 
-当前已验证（SQUEEZ，2006）三组 IDX/PAK、其中的 279 个 DAT 与 1,181 个 GR，以及 EAGLS.exe 的基础 6 字节中文显示补丁（游戏内实测）。可选中文排版模式已接入指令分类与字节保真回归，但字体和排版视觉效果仍待游戏内验收；格式与补丁证据见 `eagls-archive.md` 和 `eagls-content.md`。其他版本不能直接套用。
+当前已验证（SQUEEZ，2006）三组 IDX/PAK、其中的 279 个 DAT 与 1,181 个 GR，以及 EAGLS.exe 的基础 6 字节中文显示补丁（游戏内实测）；同类引擎的 SAIMIN.exe（OLE-M）5 字节补丁已实现，字节定位、双编译器产物与拒绝路径均有回归，游戏内待验收。可选中文排版模式（仅 EAGLS）已接入指令分类与字节保真回归，但字体和排版视觉效果仍待游戏内验收；格式与补丁证据见 `eagls-archive.md` 和 `eagls-content.md`。其他版本不能直接套用。
 
 测试逐步覆盖：空/短输入、索引范围、文件名边界、算法种子边界、已知字节序列，以及真实样本的交叉验证。仅用同一套代码做解包再回包不能证明兼容。
 

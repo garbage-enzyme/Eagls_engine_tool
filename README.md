@@ -33,7 +33,7 @@ EAGLS 是部分日文视觉小说所使用的游戏引擎，游戏资源封装�
 | 脚本       | `dat decrypt`、`dat text`             | 解密 DAT；导出保留原编码的正文                              |
 | 图像       | `gr decode`、`gr encode`              | GR 与 24/32 位 BMP 互相转换                                 |
 | 文本       | `text extract`、`text apply`          | 提取 JSON 文本清单；按清单回填译文并重建 DAT，支持 GBK 译文 |
-| 可执行文件 | `exe check`、`exe patch`              | 为 EAGLS.exe 打 GBK 中文显示补丁，可选中文排版              |
+| 可执行文件 | `exe check`、`exe patch`              | 为 EAGLS.exe / SAIMIN.exe 打 GBK 中文显示补丁，可选中文排版（仅 EAGLS） |
 | 图形界面   | —                                     | 尚未接入                                         |
 
 ### 验证情况
@@ -44,7 +44,7 @@ EAGLS 是部分日文视觉小说所使用的游戏引擎，游戏资源封装�
 - **脚本与图像**：279 个 DAT 与 1,181 张 GR，共 1,739 个输出与独立实现逐字节一致；GR 编码经真实样本与合成 BMP 往返验证（解码、编码、再解码逐字节一致）。
 - **文本**：全量清单覆盖 187 个 DAT、17,414 条文本、71 位说话者；未改动的清单回填后与原文件逐字节一致；`a001.dat` 中的 10 条 GBK 译文已通过游戏内显示验证。
 - **回包**：无替换与原样替换时，重建的 idx/pak 与原文件逐字节一致（28 与 40 字节记录布局各有回归）；替换内容后可重新打开并提取。40 字节记录布局下拒绝把条目替换成空文件（长度 0 是引擎的扫描终止标记）。
-- **可执行文件**：基础 6 字节 GBK 补丁已通过游戏内验证，产物与独立实现逐字节一致。
+- **可执行文件**：EAGLS 的 6 字节基础 GBK 补丁已通过游戏内验证，产物与独立实现逐字节一致；SAIMIN 的 5 字节补丁已完成字节级定位（真实样本 + 合成回归）与双编译器产物一致性验证，**游戏内待验收**。
 
 ### 已知限制
 
@@ -195,14 +195,14 @@ eagls text apply   <文件或目录> --table FILE.json --out DIR [--overwrite] [
 ### 可执行文件（exe）
 
 ```text
-eagls exe check <EAGLS.exe> [--typography zh-cn]
-eagls exe patch <EAGLS.exe> [--out FILE] [--overwrite] [--typography zh-cn]
+eagls exe check <EAGLS.exe|SAIMIN.exe> [--typography zh-cn]
+eagls exe patch <EAGLS.exe|SAIMIN.exe> [--out FILE] [--overwrite] [--typography zh-cn]
 ```
 
-- `check`：按特征码定位所选补丁并报告当前状态，不写文件。默认只检查基础 GBK 补丁。
+- `check`：按特征码**自动识别 EAGLS / SAIMIN 版本**并报告所选补丁的当前状态，不写文件。默认只检查基础 GBK 补丁。
 - `patch`：写出补丁副本，默认文件名为 `<主文件名>-cn.exe`，拒绝覆盖输入文件本身。补丁依赖特征码定位，遇到未识别的可执行文件会明确报错，不会写入任何字节。
-- 默认只做已通过游戏内验证的 6 字节 GBK 补丁，需配合 `text apply --encoding gbk`。
-- `--typography zh-cn`（可选）：另把字体名换为 `SimHei` / `SimSun`，并迁移中文行首禁则与标点字距分类，支持从已识别的旧 GBK 补丁升级。该模式沿用原字距系数与单次悬挂，**不含完整的连续标点与行尾禁则处理，游戏内视觉效果待验收**。
+- 默认是已游戏内验证的 GBK 补丁（EAGLS 6 处 / SAIMIN 5 处），需配合 `text apply --encoding gbk`；SAIMIN 的补丁**游戏内待验收**。
+- `--typography zh-cn`（可选，仅 EAGLS 版）：另把字体名换为 `SimHei` / `SimSun`，并迁移中文行首禁则与标点字距分类，支持从已识别的旧 GBK 补丁升级。该模式沿用原字距系数与单次悬挂，**不含完整的连续标点与行尾禁则处理，游戏内视觉效果待验收**。
 
 ## 项目结构
 

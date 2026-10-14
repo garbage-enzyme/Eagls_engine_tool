@@ -93,6 +93,67 @@ if(GROUP STREQUAL "exe_local")
     if(NOT sample_before STREQUAL sample_after)
         message(FATAL_ERROR "真实 EXE 样本被修改")
     endif()
+
+    # —— SAIMIN.exe（同一引擎的另一编译版本，5 处字节）——
+    # 同一条命令自动识别版本；产物 SHA-256 必须与已验证版本一致。样本缺失时跳过。
+    if(EXISTS "${SAIMIN_SAMPLE}")
+        execute_process(COMMAND "${CLI}" exe check "${SAIMIN_SAMPLE}"
+            RESULT_VARIABLE saimin_check_code OUTPUT_VARIABLE saimin_check_output
+            ERROR_VARIABLE saimin_check_error ENCODING UTF-8 TIMEOUT 20)
+        if(NOT "${saimin_check_code}" STREQUAL "0" OR NOT saimin_check_error STREQUAL "")
+            message(FATAL_ERROR
+                "SAIMIN exe check 失败：${saimin_check_code}；${saimin_check_output}；${saimin_check_error}")
+        endif()
+        if(NOT saimin_check_output MATCHES "识别版本：SAIMIN" OR NOT saimin_check_output MATCHES "原版")
+            message(FATAL_ERROR "SAIMIN exe check 输出不符：${saimin_check_output}")
+        endif()
+        file(SHA256 "${SAIMIN_SAMPLE}" saimin_sample_before)
+        execute_process(COMMAND "${CLI}" exe patch "${SAIMIN_SAMPLE}" --out "${SAIMIN_OUTPUT}" --overwrite
+            RESULT_VARIABLE saimin_patch_code OUTPUT_VARIABLE saimin_patch_output
+            ERROR_VARIABLE saimin_patch_error ENCODING UTF-8 TIMEOUT 60)
+        if(NOT "${saimin_patch_code}" STREQUAL "0" OR NOT saimin_patch_error STREQUAL "" OR
+           NOT saimin_patch_output MATCHES "已写出")
+            message(FATAL_ERROR
+                "SAIMIN exe patch 失败：${saimin_patch_code}；${saimin_patch_output}；${saimin_patch_error}")
+        endif()
+        file(SHA256 "${SAIMIN_OUTPUT}" saimin_hash)
+        if(NOT saimin_hash STREQUAL "9ecd125fa90d62866563c1c3ab3ab58ec6508d1f5fd26fe5a7cf0968042b2b52")
+            message(FATAL_ERROR "SAIMIN 补丁产物 SHA-256 不符：${saimin_hash}")
+        endif()
+        execute_process(COMMAND "${CLI}" exe check "${SAIMIN_OUTPUT}"
+            RESULT_VARIABLE saimin_state_code OUTPUT_VARIABLE saimin_state_output
+            ERROR_VARIABLE saimin_state_error ENCODING UTF-8 TIMEOUT 20)
+        if(NOT "${saimin_state_code}" STREQUAL "0" OR NOT saimin_state_error STREQUAL "" OR
+           NOT saimin_state_output MATCHES "已打补丁")
+            message(FATAL_ERROR
+                "SAIMIN 补丁后状态检查不符：${saimin_state_code}；${saimin_state_output}；${saimin_state_error}")
+        endif()
+        # 重复补丁必须拒绝且不留下输出文件；中文排版对 SAIMIN 明确报错。
+        file(REMOVE "${SAIMIN_OUTPUT}.rejected.exe")
+        execute_process(COMMAND "${CLI}" exe patch "${SAIMIN_OUTPUT}" --out "${SAIMIN_OUTPUT}.rejected.exe"
+            RESULT_VARIABLE saimin_repeat_code OUTPUT_VARIABLE saimin_repeat_output
+            ERROR_VARIABLE saimin_repeat_error ENCODING UTF-8 TIMEOUT 20)
+        if(NOT "${saimin_repeat_code}" STREQUAL "1" OR NOT saimin_repeat_output STREQUAL "" OR
+           saimin_repeat_error STREQUAL "")
+            message(FATAL_ERROR
+                "SAIMIN 重复补丁未被拒绝：${saimin_repeat_code}；${saimin_repeat_output}；${saimin_repeat_error}")
+        endif()
+        if(EXISTS "${SAIMIN_OUTPUT}.rejected.exe")
+            message(FATAL_ERROR "SAIMIN 重复补丁失败后留下了输出文件")
+        endif()
+        execute_process(COMMAND "${CLI}" exe check "${SAIMIN_SAMPLE}" --typography zh-cn
+            RESULT_VARIABLE saimin_typo_code OUTPUT_VARIABLE saimin_typo_output
+            ERROR_VARIABLE saimin_typo_error ENCODING UTF-8 TIMEOUT 20)
+        if(NOT "${saimin_typo_code}" STREQUAL "1" OR NOT saimin_typo_output STREQUAL "" OR
+           saimin_typo_error STREQUAL "")
+            message(FATAL_ERROR
+                "SAIMIN 中文排版未被拒绝：${saimin_typo_code}；${saimin_typo_output}；${saimin_typo_error}")
+        endif()
+        file(SHA256 "${SAIMIN_SAMPLE}" saimin_sample_after)
+        if(NOT saimin_sample_before STREQUAL saimin_sample_after)
+            message(FATAL_ERROR "SAIMIN 真实样本被修改")
+        endif()
+    endif()
     return()
 endif()
 

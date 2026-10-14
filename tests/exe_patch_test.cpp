@@ -1,5 +1,5 @@
 // exe 补丁定位与应用的单元测试：构造带目标特征的最小 PE32 映像。
-// 不需要完整游戏资源；真实 EAGLS.exe 的回归由内容测试与门控 CLI 契约负责。
+// 不需要完整游戏资源；真实 EAGLS.exe / SAIMIN.exe 的回归由内容测试与门控 CLI 契约负责。
 #include <eagls/error.hpp>
 #include <eagls/exe_patch.hpp>
 
@@ -48,13 +48,18 @@ constexpr std::size_t kTextRaw = 0x400;
 constexpr std::size_t kTextSize = 0x800;
 constexpr std::size_t kFileSize = kTextRaw + kTextSize;
 
-// 前导字节判定函数（29 字节），与 kLeadPattern 一致。
+// EAGLS 版前导字节判定函数（29 字节），与实现特征一致。
 const Bytes kLead = {
     0x8A, 0x44, 0x24, 0x04, 0x3C, 0x81, 0x72, 0x04, 0x3C, 0xA0, 0x76, 0x08, 0x3C, 0xE0, 0x72,
     0x0A, 0x3C, 0xFC, 0x77, 0x06, 0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3, 0x33, 0xC0, 0xC3};
 constexpr std::size_t kLeadOffset = 0x10;  // 命中点在节内的偏移
 
-// 5 处字体字符集写入：mov byte ptr [esp+cell], 80h，cell 与 kCharsetCells 一致。
+// SAIMIN 版前导字节判定函数（27 字节，第二段为加法折算形态）。
+const Bytes kSaiminLead = {
+    0x8A, 0x44, 0x24, 0x04, 0x3C, 0x81, 0x72, 0x04, 0x3C, 0xA0, 0x76, 0x06, 0x04, 0x20, 0x3C,
+    0x1C, 0x77, 0x06, 0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3, 0x33, 0xC0, 0xC3};
+
+// EAGLS：5 处短位移字符集写入 mov byte ptr [esp+cell], 80h，cell 与实现集合一致。
 struct CharsetSite {
     std::size_t offset;  // 指令在节内的偏移
     std::uint8_t cell;   // [esp+disp] 的 disp
@@ -62,7 +67,38 @@ struct CharsetSite {
 const CharsetSite kCharsetSites[] = {
     {0x80, 0x3F}, {0x90, 0x2F}, {0xA0, 0x3B}, {0xB0, 0x33}, {0xC0, 0x5B}};
 
-Bytes build_image() {
+// SAIMIN：1 处短位移 + 3 处长位移（32 位栈偏移）字符集写入。
+constexpr std::size_t kSaiminShortOffset = 0x80;
+constexpr std::uint8_t kSaiminShortCell = 0x33;
+struct LongCharsetSite {
+    std::size_t offset;
+    std::uint32_t cell;
+};
+const LongCharsetSite kSaiminLongSites[] = {
+    {0xA0, 0xE7}, {0xC0, 0x15B}, {0xE0, 0x203}};
+
+// 写入一条字符集指令；immediate 允许构造已打补丁（86h）或未知（其他）的形态。
+void put_short_charset(Bytes& bytes, std::size_t offset, std::uint8_t cell,
+                       std::uint8_t immediate = 0x80) {
+    const std::size_t o = kTextRaw + offset;
+    bytes[o] = 0xC6;
+    bytes[o + 1] = 0x44;
+    bytes[o + 2] = 0x24;
+    bytes[o + 3] = cell;
+    bytes[o + 4] = immediate;
+}
+
+void put_long_charset(Bytes& bytes, std::size_t offset, std::uint32_t cell,
+                      std::uint8_t immediate = 0x80) {
+    const std::size_t o = kTextRaw + offset;
+    bytes[o] = 0xC6;
+    bytes[o + 1] = 0x84;
+    bytes[o + 2] = 0x24;
+    put_u32(bytes, o + 3, cell);
+    bytes[o + 7] = immediate;
+}
+
+Bytes build_pe_image() {
     Bytes bytes(kFileSize, 0x90);  // 未用位置填 NOP（0x90）
     bytes[0] = 'M';
     bytes[1] = 'Z';
@@ -71,10 +107,10 @@ Bytes build_image() {
     bytes[kPeOffset + 1] = 'E';
     bytes[kPeOffset + 2] = 0;
     bytes[kPeOffset + 3] = 0;
-    put_u16(bytes, kPeOffset + 4, 0x014C);        // IMAGE_FILE_MACHINE_I386
-    put_u16(bytes, kPeOffset + 6, 1);            // 1 个节
-    put_u16(bytes, kPeOffset + 20, 0x00E0);      // 可选头大小
-    put_u16(bytes, kPeOffset + 24, 0x010B);      // PE32
+    put_u16(bytes, kPeOffset + 4, 0x014C);  // IMAGE_FILE_MACHINE_I386
+    put_u16(bytes, kPeOffset + 6, 1);       // 1 个节
+    put_u16(bytes, kPeOffset + 20, 0x00E0); // 可选头大小
+    put_u16(bytes, kPeOffset + 24, 0x010B); // PE32
     put_u32(bytes, kPeOffset + 24 + 28, 0x400000);  // ImageBase
     const std::size_t s = kSectionTable;
     const char name[8] = {'.', 't', 'e', 'x', 't', 0, 0, 0};
@@ -84,17 +120,30 @@ Bytes build_image() {
     put_u32(bytes, s + 16, static_cast<std::uint32_t>(kTextSize));  // SizeOfRawData
     put_u32(bytes, s + 20, static_cast<std::uint32_t>(kTextRaw));   // PointerToRawData
     put_u32(bytes, s + 36, 0x60000020);                             // CODE | EXECUTE | READ
-
-    std::copy(kLead.begin(), kLead.end(), bytes.begin() + kTextRaw + kLeadOffset);
-    for (const auto& site : kCharsetSites) {
-        const std::size_t o = kTextRaw + site.offset;
-        bytes[o] = 0xC6;
-        bytes[o + 1] = 0x44;
-        bytes[o + 2] = 0x24;
-        bytes[o + 3] = site.cell;
-        bytes[o + 4] = 0x80;
-    }
     return bytes;
+}
+
+Bytes build_image() {
+    Bytes bytes = build_pe_image();
+    std::copy(kLead.begin(), kLead.end(), bytes.begin() + kTextRaw + kLeadOffset);
+    for (const auto& site : kCharsetSites) put_short_charset(bytes, site.offset, site.cell);
+    return bytes;
+}
+
+Bytes build_saimin_image() {
+    Bytes bytes = build_pe_image();
+    std::copy(kSaiminLead.begin(), kSaiminLead.end(), bytes.begin() + kTextRaw + kLeadOffset);
+    put_short_charset(bytes, kSaiminShortOffset, kSaiminShortCell);
+    for (const auto& site : kSaiminLongSites) put_long_charset(bytes, site.offset, site.cell);
+    return bytes;
+}
+
+std::size_t changed_bytes(const Bytes& a, const Bytes& b) {
+    std::size_t changed = 0;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (a[i] != b[i]) ++changed;
+    }
+    return changed;
 }
 
 }  // namespace
@@ -104,8 +153,10 @@ int main() {
         const Bytes original = build_image();
         verify_typography(original);
 
+        // —— EAGLS 版 ——
         // 定位：6 处、升序、原版状态。
         const auto report = eagls::inspect_exe_patch(original);
+        require(report.profile == eagls::ExePatchProfile::eagls, "EAGLS 映像版本识别错误。");
         require(report.sites.size() == 6, "补丁位置数不为 6。");
         require(report.state == eagls::ExePatchState::original, "原版映像状态判定错误。");
         require(report.sites.front().file_offset == kTextRaw + kLeadOffset + 9,
@@ -121,11 +172,7 @@ int main() {
         // 应用：仅 6 字节变化，重新定位为已打补丁。
         const auto patched = eagls::apply_exe_patch(original);
         require(patched.size() == original.size(), "补丁改变了文件大小。");
-        std::size_t changed = 0;
-        for (std::size_t i = 0; i < original.size(); ++i) {
-            if (original[i] != patched[i]) ++changed;
-        }
-        require(changed == 6, "补丁修改字节数不为 6。");
+        require(changed_bytes(original, patched) == 6, "补丁修改字节数不为 6。");
         require(patched[kTextRaw + kLeadOffset + 9] == 0xFE, "前导字节上界未改为 FE。");
         require(patched[kTextRaw + 0x80 + 4] == 0x86, "字体字符集未改为 86。");
         require(eagls::inspect_exe_patch(patched).state == eagls::ExePatchState::patched,
@@ -135,13 +182,133 @@ int main() {
         require(expect_error(eagls::ErrorCode::invalid_content,
                              [&] { (void)eagls::apply_exe_patch(patched); }),
                 "重复打补丁未被拒绝。");
-        Bytes mixed = original;
-        mixed[kTextRaw + 0x80 + 4] = 0x86;
-        require(eagls::inspect_exe_patch(mixed).state == eagls::ExePatchState::mixed,
-                "混合状态判定错误。");
+        {
+            Bytes mixed = original;
+            mixed[kTextRaw + 0x80 + 4] = 0x86;
+            require(eagls::inspect_exe_patch(mixed).state == eagls::ExePatchState::mixed,
+                    "混合状态判定错误。");
+            require(expect_error(eagls::ErrorCode::invalid_content,
+                                 [&] { (void)eagls::apply_exe_patch(mixed); }),
+                    "混合状态未被拒绝。");
+        }
+
+        // —— SAIMIN 版 ——
+        // 定位：5 处（1 判定 + 1 短位移 + 3 长位移）、升序、原版状态。
+        const Bytes saimin = build_saimin_image();
+        {
+            const auto saimin_report = eagls::inspect_exe_patch(saimin);
+            require(saimin_report.profile == eagls::ExePatchProfile::saimin,
+                    "SAIMIN 映像版本识别错误。");
+            require(saimin_report.sites.size() == 5, "SAIMIN 补丁位置数不为 5。");
+            require(saimin_report.state == eagls::ExePatchState::original,
+                    "SAIMIN 原版映像状态判定错误。");
+            require(saimin_report.sites.front().file_offset == kTextRaw + kLeadOffset + 9,
+                    "SAIMIN 判定函数位置错误。");
+            require(saimin_report.sites.back().file_offset == kTextRaw + 0xE0 + 7,
+                    "SAIMIN 长位移位置错误。");
+            require(std::is_sorted(saimin_report.sites.begin(), saimin_report.sites.end(),
+                                   [](const eagls::ExePatchSite& a, const eagls::ExePatchSite& b) {
+                                       return a.file_offset < b.file_offset;
+                                   }),
+                    "SAIMIN 补丁位置未按文件偏移升序。");
+        }
+
+        // 应用：仅 5 字节变化，重新定位为已打补丁且版本保持 SAIMIN。
+        const auto saimin_patched = eagls::apply_exe_patch(saimin);
+        require(saimin_patched.size() == saimin.size(), "SAIMIN 补丁改变了文件大小。");
+        require(changed_bytes(saimin, saimin_patched) == 5, "SAIMIN 补丁修改字节数不为 5。");
+        require(saimin_patched[kTextRaw + kLeadOffset + 9] == 0xFE,
+                "SAIMIN 前导字节上界未改为 FE。");
+        require(saimin_patched[kTextRaw + kSaiminShortOffset + 4] == 0x86,
+                "SAIMIN 短位移字符集未改为 86。");
+        for (const auto& site : kSaiminLongSites) {
+            require(saimin_patched[kTextRaw + site.offset + 7] == 0x86,
+                    "SAIMIN 长位移字符集未改为 86。");
+        }
+        {
+            const auto again = eagls::inspect_exe_patch(saimin_patched);
+            require(again.state == eagls::ExePatchState::patched, "SAIMIN 补丁后状态判定错误。");
+            require(again.profile == eagls::ExePatchProfile::saimin, "SAIMIN 补丁后版本识别错误。");
+        }
+
+        // 重复打补丁、混合状态必须拒绝。
         require(expect_error(eagls::ErrorCode::invalid_content,
-                             [&] { (void)eagls::apply_exe_patch(mixed); }),
-                "混合状态未被拒绝。");
+                             [&] { (void)eagls::apply_exe_patch(saimin_patched); }),
+                "SAIMIN 重复打补丁未被拒绝。");
+        {
+            Bytes mixed = saimin;
+            mixed[kTextRaw + kSaiminShortOffset + 4] = 0x86;
+            require(eagls::inspect_exe_patch(mixed).state == eagls::ExePatchState::mixed,
+                    "SAIMIN 混合状态判定错误。");
+            require(expect_error(eagls::ErrorCode::invalid_content,
+                                 [&] { (void)eagls::apply_exe_patch(mixed); }),
+                    "SAIMIN 混合状态未被拒绝。");
+        }
+
+        // 中文排版仅 EAGLS 版支持，SAIMIN 必须明确拒绝。
+        require(expect_error(
+                    eagls::ErrorCode::invalid_content,
+                    [&] { (void)eagls::inspect_exe_patch(saimin, eagls::ExePatchTarget::gbk_zh_cn); }),
+                "SAIMIN 版的中文排版未被拒绝。");
+
+        // 长位移栈偏移必须整体读取（15B/203 的完整值才在集合中）；
+        // 集合外的同形写入不属于本补丁，应被忽略而不是误计入。
+        {
+            Bytes extra = saimin;
+            put_short_charset(extra, 0x150, 0x55);
+            put_long_charset(extra, 0x180, 0x7F);
+            const auto extra_report = eagls::inspect_exe_patch(extra);
+            require(extra_report.sites.size() == 5, "集合外的字符集写入影响了 SAIMIN 定位。");
+        }
+
+        // 唯一性：同一栈偏移重复命中直接拒绝；缺失一处则数量不符。
+        {
+            Bytes duplicate = saimin;
+            put_short_charset(duplicate, 0x100, kSaiminShortCell);
+            require(expect_error(eagls::ErrorCode::invalid_content,
+                                 [&] { (void)eagls::inspect_exe_patch(duplicate); }),
+                    "SAIMIN 重复栈偏移未被拒绝。");
+        }
+        {
+            Bytes missing = saimin;
+            missing[kTextRaw + kSaiminLongSites[1].offset + 7] = 0x81;  // 不再是 80h/86h
+            require(expect_error(eagls::ErrorCode::invalid_content,
+                                 [&] { (void)eagls::inspect_exe_patch(missing); }),
+                    "SAIMIN 字符集写入数量不符未被拒绝。");
+        }
+
+        // 判定特征缺失 / 重复。
+        {
+            Bytes broken = saimin;
+            broken[kTextRaw + kLeadOffset + 4] = 0x99;  // 破坏 cmp al,81h
+            require(expect_error(eagls::ErrorCode::invalid_content,
+                                 [&] { (void)eagls::inspect_exe_patch(broken); }),
+                    "SAIMIN 判定特征缺失未被拒绝。");
+        }
+        {
+            Bytes doubled = saimin;
+            std::copy(kSaiminLead.begin(), kSaiminLead.end(), doubled.begin() + kTextRaw + 0x300);
+            require(expect_error(eagls::ErrorCode::invalid_content,
+                                 [&] { (void)eagls::inspect_exe_patch(doubled); }),
+                    "SAIMIN 重复判定特征未被拒绝。");
+        }
+
+        // 跨版本歧义：两个版本的特征同时出现时必须拒绝，而不是猜一个。
+        {
+            Bytes ambiguous = original;
+            std::copy(kSaiminLead.begin(), kSaiminLead.end(),
+                      ambiguous.begin() + kTextRaw + 0x300);
+            require(expect_error(eagls::ErrorCode::invalid_content,
+                                 [&] { (void)eagls::inspect_exe_patch(ambiguous); }),
+                    "EAGLS 映像上的 SAIMIN 特征未被拒绝。");
+        }
+        {
+            Bytes ambiguous = saimin;
+            std::copy(kLead.begin(), kLead.end(), ambiguous.begin() + kTextRaw + 0x300);
+            require(expect_error(eagls::ErrorCode::invalid_content,
+                                 [&] { (void)eagls::inspect_exe_patch(ambiguous); }),
+                    "SAIMIN 映像上的 EAGLS 特征未被拒绝。");
+        }
 
         // 非 PE、截断、非 i386、非 PE32、节数据越界。
         require(expect_error(eagls::ErrorCode::invalid_content,
@@ -176,7 +343,7 @@ int main() {
                     "节数据越界未被拒绝。");
         }
 
-        // 特征缺失、重复、数量不符。
+        // EAGLS 特征缺失、重复、数量不符。
         {
             Bytes broken = original;
             broken[kTextRaw + kLeadOffset + 4] = 0x99;  // 破坏 cmp al,81h

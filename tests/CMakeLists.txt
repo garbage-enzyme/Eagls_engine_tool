@@ -27,8 +27,10 @@ if(EAGLS_BUILD_CLI)
         )
         set_tests_properties(cli.contract.${group} PROPERTIES TIMEOUT 30)
     endforeach()
-    # 真实 EAGLS.exe 补丁回归：仅在显式启用本地样本且可推导出样本 EXE 时注册。
+    # 真实样本补丁回归：EAGLS.exe 与 SAIMIN.exe 由同一条命令自动识别版本。
+    # 仅在显式启用本地样本且可推导出样本 EXE 时注册。
     set(EAGLS_LOCAL_GAME_EXE "${EAGLS_LOCAL_CONTENT_DIR}/../fixtures/local/yanyun2/EAGLS.exe")
+    set(EAGLS_LOCAL_SAIMIN_EXE "${EAGLS_LOCAL_CONTENT_DIR}/../fixtures/local/OLE-M/SAIMIN/SAIMIN.exe")
     if(EAGLS_LOCAL_CONTENT_DIR AND EXISTS "${EAGLS_LOCAL_GAME_EXE}")
         add_test(NAME cli.contract.exe_local
             COMMAND "${CMAKE_COMMAND}"
@@ -36,6 +38,8 @@ if(EAGLS_BUILD_CLI)
                 "-DGROUP=exe_local"
                 "-DSAMPLE=${EAGLS_LOCAL_GAME_EXE}"
                 "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/eagls-cn-local.exe"
+                "-DSAIMIN_SAMPLE=${EAGLS_LOCAL_SAIMIN_EXE}"
+                "-DSAIMIN_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/saimin-cn-local.exe"
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/cli_contract_test.cmake"
         )
         set_tests_properties(cli.contract.exe_local PROPERTIES TIMEOUT 60)
